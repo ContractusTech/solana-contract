@@ -2,9 +2,9 @@
 seeds = false
 skip-lint = false
 [programs.localnet]
-deal_contract = "4Ptc1sVSJHSwv6L2RmefRjezVw6LELuKEvJYdZyyRJN1"
+deal_contract = "Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS"
 [programs.devnet]
-deal_contract = "4Ptc1sVSJHSwv6L2RmefRjezVw6LELuKEvJYdZyyRJN1"
+deal_contract = "Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS"
 
 [registry]
 url = "https://api.apr.dev"
