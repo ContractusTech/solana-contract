@@ -140,6 +140,8 @@ describe("Contractus contract tests", () => {
       payer: payer.publicKey,
       serviceFeeAccount: serviceFeeTokenAccount,
       clientTokenAccount: clientTokenAccount,
+      executorTokenAccount: executorTokenAccount,
+      checkerTokenAccount: checkerTokenAccount,
       mint: mint,
       depositAccount: vault_account_pda,
       dealState: state_account_pda,
@@ -178,6 +180,8 @@ describe("Contractus contract tests", () => {
       payer: payer.publicKey,
       serviceFeeAccount: serviceFeeTokenAccount,
       clientTokenAccount: clientTokenAccount,
+      executorTokenAccount: executorTokenAccount,
+      checkerTokenAccount: checkerTokenAccount,
       mint: mint,
       depositAccount: vault_account_pda,
       dealState: state_account_pda,
@@ -194,6 +198,112 @@ describe("Contractus contract tests", () => {
     .catch((error)=>{
       assert.ok(true)
     })
+  });
+
+  it("Finish deal", async () => { 
+
+    const seed = Buffer.from(anchor.utils.bytes.utf8.encode("123456789"))
+    
+    const [_vault_account_pda, _vault_account_bump] = await PublicKey.findProgramAddress(
+      [seed, Buffer.from(anchor.utils.bytes.utf8.encode("deposit"))],
+      program.programId
+    );
+    var vault_account_pda = _vault_account_pda;
+    var vault_account_bump = _vault_account_bump;
+
+    const [_vault_authority_pda, _vault_authority_bump] = await PublicKey.findProgramAddress(
+      [seed, Buffer.from(anchor.utils.bytes.utf8.encode("auth"))],
+      program.programId
+    );
+
+    const [_state_account_pda, _state_account_bump] = await PublicKey.findProgramAddress(
+      [seed, Buffer.from(anchor.utils.bytes.utf8.encode("state"))],
+      program.programId
+    );
+
+    var state_account_bump = _state_account_bump
+    var state_account_pda = _state_account_pda
+
+    var vault_authority_pda = _vault_authority_pda;
+    let fee = 100
+    await program.methods.initialize(
+      vault_account_bump,
+      state_account_bump,
+      seed,
+      new anchor.BN(amount),
+      new anchor.BN(service_fee),
+      new anchor.BN(fee)
+    )
+    .accounts({
+      client: clientAccount.publicKey,
+      executor: executorAccount.publicKey,
+      checker: checkerAccount.publicKey,
+      payer: payer.publicKey,
+      serviceFeeAccount: serviceFeeTokenAccount,
+      clientTokenAccount: clientTokenAccount,
+      executorTokenAccount: executorTokenAccount,
+      checkerTokenAccount: checkerTokenAccount,
+      mint: mint,
+      depositAccount: vault_account_pda,
+      dealState: state_account_pda,
+      systemProgram: anchor.web3.SystemProgram.programId,
+      rent: anchor.web3.SYSVAR_RENT_PUBKEY,
+      tokenProgram: TOKEN_PROGRAM_ID,
+      
+    })
+    .signers([clientAccount, executorAccount, checkerAccount, payer])
+    .rpc()
+
+    const state = await program.account.dealState.fetch(state_account_pda)
+    
+    const depositAccount = await getAccount(
+      provider.connection, 
+      state.depositKey
+    )
+   
+    const clientTokenAccountInfoBefore = await getAccount(
+      provider.connection, 
+      clientTokenAccount
+    )
+
+    const executorTokenAccountInfoBefore = await getAccount(
+      provider.connection, 
+      executorTokenAccount
+    )
+
+    await program.methods
+    .finish(seed, false)
+    .accounts({
+      initializer: checkerAccount.publicKey,
+      authority: vault_authority_pda,
+      depositAccount: vault_account_pda,
+      executorTokenAccount: executorTokenAccount,
+      checkerTokenAccount: checkerTokenAccount,
+      dealState: state_account_pda,
+      tokenProgram: TOKEN_PROGRAM_ID,
+    })
+    .signers([checkerAccount])
+    .rpc()
+    
+    const clientTokenAccountInfo = await getAccount(
+      provider.connection, 
+      clientTokenAccount
+    )
+
+    const executorTokenAccountInfo = await getAccount(
+      provider.connection, 
+      executorTokenAccount
+    )
+
+    const checkerTokenAccountInfo = await getAccount(
+      provider.connection, 
+      checkerTokenAccount
+    )
+
+    assert.ok(Number(clientTokenAccountInfoBefore.amount).toString() == clientTokenAccountInfo.amount.toString())
+    assert.ok((Number(executorTokenAccountInfo.amount)).toString() == (Number(otherTokenBalance) + amount).toString())
+    assert.ok((Number(checkerTokenAccountInfo.amount)).toString() == (Number(otherTokenBalance) + fee).toString())
+
   });
 
   it("Cancel deal", async () => { 
@@ -237,13 +347,14 @@ describe("Contractus contract tests", () => {
       payer: payer.publicKey,
       serviceFeeAccount: serviceFeeTokenAccount,
       clientTokenAccount: clientTokenAccount,
+      executorTokenAccount: executorTokenAccount,
+      checkerTokenAccount: checkerTokenAccount,
       mint: mint,
       depositAccount: vault_account_pda,
       dealState: state_account_pda,
       systemProgram: anchor.web3.SystemProgram.programId,
       rent: anchor.web3.SYSVAR_RENT_PUBKEY,
       tokenProgram: TOKEN_PROGRAM_ID,
-      
     })
     .signers([clientAccount, executorAccount, checkerAccount, payer])
     .rpc()

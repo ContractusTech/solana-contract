@@ -28,13 +28,18 @@ pub mod deal_contract {
             return Err(ErrorCode::AlreadyStarted.into());
         }
         ctx.accounts.deal_state.is_started = true;
+
         ctx.accounts.deal_state.client_key = *ctx.accounts.client.key;
         ctx.accounts.deal_state.executor_key = *ctx.accounts.executor.to_account_info().key;
         ctx.accounts.deal_state.checker_key = *ctx.accounts.checker.to_account_info().key;
         ctx.accounts.deal_state.deposit_key = *ctx.accounts.deposit_account.to_account_info().key;
-        ctx.accounts.deal_state.amount = amount;
+        
         ctx.accounts.deal_state.client_token_account_key = *ctx.accounts.client_token_account.to_account_info().key;
+        ctx.accounts.deal_state.executor_token_account_key = *ctx.accounts.executor_token_account.to_account_info().key;
+        ctx.accounts.deal_state.checker_token_account_key = *ctx.accounts.checker_token_account.to_account_info().key;
+        
         ctx.accounts.deal_state.checker_fee = checker_fee;
+        ctx.accounts.deal_state.amount = amount;
         
         let (authority, authority_bump) =
             Pubkey::find_program_address(&[&id, &AUTHORITY_SEED], ctx.program_id);
@@ -60,7 +65,48 @@ pub mod deal_contract {
         Ok(())
     }
 
-    pub fn finish(ctx: Context<Finish>) -> Result<()> {
+    pub fn finish(
+        ctx: Context<Finish>, 
+        id: Vec<u8>,
+        send_fee: bool
+    ) -> Result<()> {
+
+        if !ctx.accounts.deal_state.is_started {
+            return Err(ErrorCode::NotStarted.into());
+        }
+
+        let (_authority, _authority_bump) =
+            Pubkey::find_program_address(&[&id, &AUTHORITY_SEED], ctx.program_id);
+
+        let authority_seeds = &[&id, &AUTHORITY_SEED[..], &[_authority_bump]];
+        let amount = ctx.accounts.deal_state.amount + ctx.accounts.deal_state.checker_fee;
+
+        token::transfer(
+            ctx.accounts
+                .into_transfer_to_executor_token_account_context()
+                .with_signer(&[&authority_seeds[..]]),
+                ctx.accounts.deal_state.amount,
+        )?;
+        
+        // If finish by Checker need send fee or if finish by client and send send_fee=true
+        if ctx.accounts.deal_state.checker_fee > 0 && ((ctx.accounts.initializer.to_account_info().key == &ctx.accounts.deal_state.checker_key) || 
+            (send_fee && ctx.accounts.initializer.to_account_info().key == &ctx.accounts.deal_state.client_key))
+        {
+            
+            token::transfer(
+                ctx.accounts
+                    .into_transfer_to_checker_token_account_context()
+                    .with_signer(&[&authority_seeds[..]]),
+                    ctx.accounts.deal_state.checker_fee,
+            )?;
+        } 
+
+        token::close_account(
+            ctx.accounts
+                .into_close_context()
+                .with_signer(&[&authority_seeds[..]]),
+        )?;
+
         Ok(())
     }
 
@@ -113,12 +159,18 @@ pub struct Initialize<'info> {
     pub payer: AccountInfo<'info>,
     /// CHECK: This is not dangerous because we don't read or write from this account
     #[account(mut)]
-    pub service_fee_account: AccountInfo<'info>,
+    pub service_fee_account: Box<Account<'info, TokenAccount>>,
     #[account(
         mut,
         constraint = client_token_account.amount >= (amount + service_fee + checker_fee)
     )]
-    pub client_token_account: Account<'info, TokenAccount>,
+    pub client_token_account: Box<Account<'info, TokenAccount>>,
+     /// CHECK: This is not dangerous because we don't read or write from this account
+    #[account(mut)]
+    pub executor_token_account: Box<Account<'info, TokenAccount>>,
+     /// CHECK: This is not dangerous because we don't read or write from this account
+    #[account(mut)]
+    pub checker_token_account: Box<Account<'info, TokenAccount>>,
     pub mint: Account<'info, Mint>,
     #[account(
         init,
@@ -155,6 +207,7 @@ pub struct Cancel<'info> {
     /// CHECK: This is not dangerous because we don't read or write from this account
     #[account(mut)]
     pub deposit_account: Account<'info, TokenAccount>,
+    /// CHECK: This is not dangerous because we don't read or write from this account
     #[account(mut)]
     pub client_token_account: Account<'info, TokenAccount>,
     #[account(
@@ -171,7 +224,34 @@ pub struct Cancel<'info> {
 }
 
 #[derive(Accounts)]
-pub struct Finish { }
+pub struct Finish<'info> { 
+    /// CHECK: This is not dangerous because we don't read or write from this account
+    #[account(mut, signer)]
+    pub initializer: AccountInfo<'info>,
+    /// CHECK: This is not dangerous because we don't read or write from this account
+    pub authority: AccountInfo<'info>,
+    /// CHECK: This is not dangerous because we don't read or write from this account
+    #[account(mut)]
+    pub deposit_account: Account<'info, TokenAccount>,
+     /// CHECK: This is not dangerous because we don't read or write from this account
+    #[account(mut)]
+    pub executor_token_account: Account<'info, TokenAccount>,
+     /// CHECK: This is not dangerous because we don't read or write from this account
+    #[account(mut)]
+    pub checker_token_account: Account<'info, TokenAccount>,
+    #[account(
+        mut,
+        constraint = (*initializer.to_account_info().key == deal_state.client_key || *initializer.to_account_info().key == deal_state.checker_key),
+        constraint = deal_state.deposit_key == *deposit_account.to_account_info().key,
+        constraint = *authority.to_account_info().key == deal_state.authority_deposit,
+        constraint = *executor_token_account.to_account_info().key == deal_state.executor_token_account_key,
+        constraint = *checker_token_account.to_account_info().key == deal_state.checker_token_account_key,
+        close = initializer
+    )]
+    pub deal_state: Box<Account<'info, DealState>>,
+    /// CHECK: This is not dangerous because we don't read or write from this account
+    pub token_program: AccountInfo<'info>
+}
 
 
 #[account]
@@ -179,7 +259,9 @@ pub struct DealState {
     pub client_key: Pubkey,
     pub client_token_account_key: Pubkey,
     pub executor_key: Pubkey,
+    pub executor_token_account_key: Pubkey,
     pub checker_key: Pubkey,
+    pub checker_token_account_key: Pubkey,
     pub deposit_key: Pubkey,
     pub authority_deposit: Pubkey,
     pub amount: u64,
@@ -189,7 +271,7 @@ pub struct DealState {
 
 impl DealState {
     pub fn space() -> usize {
-        8 + 32 + 32 + 32 + 32 + 32 + 32 + 8 + 8 + 1
+        8 + 32 + 32 + 32 + 32 + 32 + 32 + 32 + 32 + 8 + 8 + 1
     }
 }
 
@@ -235,6 +317,37 @@ impl<'info> Cancel<'info> {
         let cpi_accounts = Transfer {
             from: self.deposit_account.to_account_info(),
             to: self.client_token_account.to_account_info(),
+            authority: self.authority.clone()
+        };
+        CpiContext::new(self.token_program.to_account_info(), cpi_accounts)
+    }
+
+    fn into_close_context(&self) -> CpiContext<'_, '_, '_, 'info, CloseAccount<'info>> {
+        let cpi_accounts = CloseAccount {
+            account: self.deposit_account.to_account_info(),
+            destination: self.initializer.to_account_info(),
+            authority: self.authority.clone(),
+        };
+        CpiContext::new(self.token_program.to_account_info(), cpi_accounts)
+    }
+}
+
+// Finish
+impl<'info> Finish<'info> {
+
+    fn into_transfer_to_executor_token_account_context(&self) -> CpiContext<'_, '_, '_, 'info, Transfer<'info>> {
+        let cpi_accounts = Transfer {
+            from: self.deposit_account.to_account_info(),
+            to: self.executor_token_account.to_account_info(),
+            authority: self.authority.clone()
+        };
+        CpiContext::new(self.token_program.to_account_info(), cpi_accounts)
+    }
+
+    fn into_transfer_to_checker_token_account_context(&self) -> CpiContext<'_, '_, '_, 'info, Transfer<'info>> {
+        let cpi_accounts = Transfer {
+            from: self.deposit_account.to_account_info(),
+            to: self.checker_token_account.to_account_info(),
             authority: self.authority.clone()
         };
         CpiContext::new(self.token_program.to_account_info(), cpi_accounts)
