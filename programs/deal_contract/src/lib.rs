@@ -37,7 +37,8 @@ pub mod deal_contract {
         ctx.accounts.deal_state.client_token_account_key = *ctx.accounts.client_token_account.to_account_info().key;
         ctx.accounts.deal_state.executor_token_account_key = *ctx.accounts.executor_token_account.to_account_info().key;
         ctx.accounts.deal_state.checker_token_account_key = *ctx.accounts.checker_token_account.to_account_info().key;
-        
+        ctx.accounts.deal_state.service_key = *ctx.accounts.checker_token_account.to_account_info().key;
+
         ctx.accounts.deal_state.checker_fee = checker_fee;
         ctx.accounts.deal_state.amount = amount;
         
@@ -212,7 +213,7 @@ pub struct Cancel<'info> {
     pub client_token_account: Account<'info, TokenAccount>,
     #[account(
         mut,
-        constraint = (*initializer.to_account_info().key == deal_state.client_key || *initializer.to_account_info().key == deal_state.executor_key || *initializer.to_account_info().key == deal_state.checker_key),
+        constraint = (*initializer.to_account_info().key == deal_state.client_key || *initializer.to_account_info().key == deal_state.executor_key || *initializer.to_account_info().key == deal_state.checker_key || *initializer.to_account_info().key == deal_state.service_key),
         constraint = deal_state.deposit_key == *deposit_account.to_account_info().key,
         constraint = *authority.to_account_info().key == deal_state.authority_deposit,
         constraint = *client_token_account.to_account_info().key == deal_state.client_token_account_key,
@@ -264,6 +265,7 @@ pub struct DealState {
     pub checker_token_account_key: Pubkey,
     pub deposit_key: Pubkey,
     pub authority_deposit: Pubkey,
+    pub service_key: Pubkey,
     pub amount: u64,
     pub checker_fee: u64,
     pub is_started: bool
@@ -271,7 +273,7 @@ pub struct DealState {
 
 impl DealState {
     pub fn space() -> usize {
-        8 + 32 + 32 + 32 + 32 + 32 + 32 + 32 + 32 + 8 + 8 + 1
+        8 + 32 + 32 + 32 + 32 + 32 + 32 + 32 + 32 + 32 + 8 + 8 + 1
     }
 }
 
