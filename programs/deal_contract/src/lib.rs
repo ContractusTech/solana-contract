@@ -6,7 +6,7 @@ use spl_token::instruction::AuthorityType;
 use std::convert::Into;
 use std::convert::TryInto;
 
-declare_id!("Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS");
+declare_id!("9kpWdyR2qtNT21MhLRTBbT21v5thz9hhB3zaPUhr6tbE");
 
 #[program]
 pub mod deal_contract {
