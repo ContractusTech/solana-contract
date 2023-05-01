@@ -34,7 +34,7 @@ describe("Test deal contract with SPL token", () => {
   var serviceFeeTokenAccount;
 
 
-  const initDeal = async (dealId, fee) => {
+  const initDeal = async (dealId, checkerFee) => {
     const seed = Buffer.from(anchor.utils.bytes.utf8.encode(dealId))
 
     const [_vault_account_pda, _vault_account_bump] = await PublicKey.findProgramAddress(
@@ -64,7 +64,7 @@ describe("Test deal contract with SPL token", () => {
       seed,
       new anchor.BN(amount),
       new anchor.BN(service_fee),
-      new anchor.BN(fee)
+      new anchor.BN(checkerFee)
     )
       .accounts({
         client: clientAccount.publicKey,
@@ -241,8 +241,8 @@ describe("Test deal contract with SPL token", () => {
   it("Cancel deal", async () => {
 
     let dealId = "12345678"
-    let fee = 100
-    let data = await initDeal(dealId, fee)
+    let checkerFee = 100
+    let data = await initDeal(dealId, checkerFee)
     
     const state = await program.account.dealState.fetch(data.state_account_pda)
 
@@ -255,8 +255,8 @@ describe("Test deal contract with SPL token", () => {
       provider.connection,
       clientTokenAccount
     )
-    assert.ok(depositAccount.amount.toString() == amount.toString())
-    assert.ok(state.checkerFee.toString() == new anchor.BN(0).toString())
+    assert.ok(depositAccount.amount.toString() == (amount + checkerFee).toString())
+    assert.ok(state.checkerFee.toString() == new anchor.BN(checkerFee).toString())
     assert.ok(state.amount.toNumber().toString() == amount.toString())
     assert.ok(state.clientKey.toBase58() == clientAccount.publicKey.toBase58())
     assert.ok(state.executorKey.toBase58() == executorAccount.publicKey.toBase58())
@@ -278,6 +278,66 @@ describe("Test deal contract with SPL token", () => {
       provider.connection,
       clientTokenAccount
     )
-    assert.ok((Number(clientTokenAccountInfoBefore.amount) + Number(amount)).toString() == clientTokenAccountInfo.amount.toString())
+    assert.ok((Number(clientTokenAccountInfoBefore.amount) + Number(amount + checkerFee)).toString() == clientTokenAccountInfo.amount.toString())
   });
+
+  it("Try start deal with the same executor and client", async () => {
+    const seed = Buffer.from(anchor.utils.bytes.utf8.encode("1234"))
+
+    const [_vault_account_pda, _vault_account_bump] = await PublicKey.findProgramAddress(
+      [seed, Buffer.from(anchor.utils.bytes.utf8.encode("deposit"))],
+      program.programId
+    );
+    var vault_account_pda = _vault_account_pda;
+    var vault_account_bump = _vault_account_bump;
+
+    const [_vault_authority_pda, _vault_authority_bump] = await PublicKey.findProgramAddress(
+      [seed, Buffer.from(anchor.utils.bytes.utf8.encode("auth"))],
+      program.programId
+    );
+
+    const [_state_account_pda, _state_account_bump] = await PublicKey.findProgramAddress(
+      [seed, Buffer.from(anchor.utils.bytes.utf8.encode("state"))],
+      program.programId
+    );
+
+    var state_account_bump = _state_account_bump
+    var state_account_pda = _state_account_pda
+
+    var vault_authority_pda = _vault_authority_pda;
+    var promise = program.methods.initialize(
+      vault_account_bump,
+      state_account_bump,
+      seed,
+      new anchor.BN(amount),
+      new anchor.BN(0),
+      new anchor.BN(0)
+    )
+      .accounts({
+        client: clientAccount.publicKey,
+        executor: clientAccount.publicKey,
+        checker: checkerAccount.publicKey,
+        payer: payer.publicKey,
+        serviceFeeAccount: serviceFeeTokenAccount,
+        clientTokenAccount: clientTokenAccount,
+        executorTokenAccount: executorTokenAccount,
+        checkerTokenAccount: checkerTokenAccount,
+        mint: mint,
+        depositAccount: vault_account_pda,
+        dealState: state_account_pda,
+        systemProgram: anchor.web3.SystemProgram.programId,
+        rent: anchor.web3.SYSVAR_RENT_PUBKEY,
+        tokenProgram: TOKEN_PROGRAM_ID,
+
+      })
+      .signers([clientAccount, executorAccount, checkerAccount, payer])
+      .rpc()
+
+      promise.then(()=> {
+        assert.ok(false)
+      }).catch(()=> {
+        assert.ok(true)
+      })
+  })
+
 });

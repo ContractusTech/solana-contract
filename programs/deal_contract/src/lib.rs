@@ -5,15 +5,18 @@ use anchor_spl::token::{self, CloseAccount, Mint, SetAuthority, TokenAccount, Tr
 use spl_token::instruction::AuthorityType;
 use std::convert::Into;
 use std::convert::TryInto;
+use std::str::FromStr;
 
 declare_id!("9kpWdyR2qtNT21MhLRTBbT21v5thz9hhB3zaPUhr6tbE");
+
+static SERVICE_TOKEN_ADDRESS: &'static str = "CyhjLfsfDz7rtszqBGaHiFrBbck2LNKEXQkywqNrGVyw";
 
 #[program]
 pub mod deal_contract {
     use super::*;
 
     const AUTHORITY_SEED: &[u8] = b"auth";
-
+    
     pub fn initialize(
         ctx: Context<Initialize>,
         _vault_account_bump: u8,
@@ -27,6 +30,13 @@ pub mod deal_contract {
         if ctx.accounts.deal_state.is_started {
             return Err(ErrorCode::AlreadyStarted.into());
         }
+
+        let FREE_COMISSION_TOKEN: Pubkey = Pubkey::from_str(SERVICE_TOKEN_ADDRESS).unwrap();
+
+        if service_fee == 0 && *ctx.accounts.mint.to_account_info().key != FREE_COMISSION_TOKEN {
+            return Err(ErrorCode::FeeIsTooLow.into());
+        }
+
         ctx.accounts.deal_state.is_started = true;
 
         ctx.accounts.deal_state.client_key = *ctx.accounts.client.key;
@@ -147,7 +157,11 @@ pub mod deal_contract {
 #[instruction(vault_account_bump: u8, state_account_bump: u8, id: Vec<u8>, amount: u64, service_fee: u64, checker_fee: u64)]
 pub struct Initialize<'info> {
     /// CHECK: This is not dangerous because we don't read or write from this account
-    #[account(mut, signer)]
+    #[account(
+        mut, 
+        signer, 
+        constraint = *executor.to_account_info().key != *client.to_account_info().key
+    )]
     pub client: AccountInfo<'info>,
     /// CHECK: This is not dangerous because we don't read or write from this account
     #[account(mut, signer)]
@@ -370,5 +384,7 @@ pub enum ErrorCode {
     #[msg("Deal already started")]
     AlreadyStarted,
     #[msg("Deal not started")]
-    NotStarted
+    NotStarted,
+    #[msg("Fee is too low")]
+    FeeIsTooLow
 }
