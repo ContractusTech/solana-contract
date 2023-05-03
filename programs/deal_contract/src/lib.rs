@@ -1,5 +1,3 @@
-use std::cell::Ref;
-use std::cmp;
 use anchor_lang::prelude::*;
 use anchor_spl::token::{self, CloseAccount, Mint, SetAuthority, TokenAccount, Transfer};
 use spl_token::instruction::AuthorityType;
@@ -7,10 +5,10 @@ use std::convert::Into;
 use std::convert::TryInto;
 use std::str::FromStr;
 
-declare_id!("9kpWdyR2qtNT21MhLRTBbT21v5thz9hhB3zaPUhr6tbE");
-
 static SERVICE_TOKEN_ADDRESS: &'static str = "CyhjLfsfDz7rtszqBGaHiFrBbck2LNKEXQkywqNrGVyw"; // NEED CHECK
 static HOLDER_MODE_AMOUNT: u64 = 10000000000000; // NEED CHECK
+
+declare_id!("9kpWdyR2qtNT21MhLRTBbT21v5thz9hhB3zaPUhr6tbE");
 
 #[program]
 pub mod deal_contract {
@@ -38,15 +36,11 @@ pub mod deal_contract {
 
         let FREE_COMISSION_TOKEN: Pubkey = Pubkey::from_str(SERVICE_TOKEN_ADDRESS).unwrap();
 
-        if service_fee == 0 {
-            if *ctx.accounts.mint.to_account_info().key != FREE_COMISSION_TOKEN {
-                 return Err(ErrorCode::FeeIsTooLow.into());
-            }
-            if ctx.accounts.client_service_token_account.mint == FREE_COMISSION_TOKEN 
-            && ctx.accounts.client_token_account.mint == FREE_COMISSION_TOKEN 
-            && ctx.accounts.client_service_token_account.amount < HOLDER_MODE_AMOUNT {
-                return Err(ErrorCode::HolderModeUnavailable.into());
-            }
+        if service_fee == 0 && 
+        ctx.accounts.client_service_token_account.amount < HOLDER_MODE_AMOUNT && 
+        ctx.accounts.client_service_token_account.mint != FREE_COMISSION_TOKEN && 
+        ctx.accounts.client_token_account.mint != FREE_COMISSION_TOKEN {
+            return Err(ErrorCode::HolderModeUnavailable.into());
         }
 
         ctx.accounts.deal_state.is_started = true;

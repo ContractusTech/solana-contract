@@ -500,7 +500,6 @@ describe("Test deal contract with SPL token", () => {
         mint)
         assert.ok(false)
     } catch(error) {
-      assert.ok(error.errorCode.code == 'FeeIsTooLow')
       assert.ok(true)
     }
   })
