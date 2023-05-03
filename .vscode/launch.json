@@ -5,23 +5,13 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "type": "lldb",
+            "command": "anchor test",
+            "name": "Run anchor test",
             "request": "launch",
-            "name": "Debug unit tests in library 'deal_contract'",
-            "cargo": {
-                "args": [
-                    "test",
-                    "--no-run",
-                    "--lib",
-                    "--package=deal_contract"
-                ],
-                "filter": {
-                    "name": "deal_contract",
-                    "kind": "lib"
-                }
-            },
-            "args": [],
-            "cwd": "${workspaceFolder}"
+            "type": "node-terminal",
+            "env": {
+                "MINT_KEY_PATH": "./.env/key.json"
+            }
         }
     ]
 }

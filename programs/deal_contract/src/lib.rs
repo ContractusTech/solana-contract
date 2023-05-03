@@ -9,7 +9,8 @@ use std::str::FromStr;
 
 declare_id!("9kpWdyR2qtNT21MhLRTBbT21v5thz9hhB3zaPUhr6tbE");
 
-static SERVICE_TOKEN_ADDRESS: &'static str = "CyhjLfsfDz7rtszqBGaHiFrBbck2LNKEXQkywqNrGVyw";
+static SERVICE_TOKEN_ADDRESS: &'static str = "CyhjLfsfDz7rtszqBGaHiFrBbck2LNKEXQkywqNrGVyw"; // NEED CHECK
+static HOLDER_MODE_AMOUNT: u64 = 10000000000000; // NEED CHECK
 
 #[program]
 pub mod deal_contract {
@@ -31,10 +32,21 @@ pub mod deal_contract {
             return Err(ErrorCode::AlreadyStarted.into());
         }
 
+        if amount == 0 {
+            return Err(ErrorCode::AmountTooLow.into());
+        }
+
         let FREE_COMISSION_TOKEN: Pubkey = Pubkey::from_str(SERVICE_TOKEN_ADDRESS).unwrap();
 
-        if service_fee == 0 && *ctx.accounts.mint.to_account_info().key != FREE_COMISSION_TOKEN {
-            return Err(ErrorCode::FeeIsTooLow.into());
+        if service_fee == 0 {
+            if *ctx.accounts.mint.to_account_info().key != FREE_COMISSION_TOKEN {
+                 return Err(ErrorCode::FeeIsTooLow.into());
+            }
+            if ctx.accounts.client_service_token_account.mint == FREE_COMISSION_TOKEN 
+            && ctx.accounts.client_token_account.mint == FREE_COMISSION_TOKEN 
+            && ctx.accounts.client_service_token_account.amount < HOLDER_MODE_AMOUNT {
+                return Err(ErrorCode::HolderModeUnavailable.into());
+            }
         }
 
         ctx.accounts.deal_state.is_started = true;
@@ -78,8 +90,7 @@ pub mod deal_contract {
 
     pub fn finish(
         ctx: Context<Finish>, 
-        id: Vec<u8>,
-        send_fee: bool
+        id: Vec<u8>
     ) -> Result<()> {
 
         if !ctx.accounts.deal_state.is_started {
@@ -99,11 +110,7 @@ pub mod deal_contract {
                 ctx.accounts.deal_state.amount,
         )?;
         
-        // If finish by Checker need send fee or if finish by client and send send_fee=true
-        if ctx.accounts.deal_state.checker_fee > 0 && ((ctx.accounts.initializer.to_account_info().key == &ctx.accounts.deal_state.checker_key) || 
-            (send_fee && ctx.accounts.initializer.to_account_info().key == &ctx.accounts.deal_state.client_key))
-        {
-            
+        if ctx.accounts.deal_state.checker_fee > 0 {
             token::transfer(
                 ctx.accounts
                     .into_transfer_to_checker_token_account_context()
@@ -173,13 +180,20 @@ pub struct Initialize<'info> {
     #[account(mut, signer)]
     pub payer: AccountInfo<'info>,
     /// CHECK: This is not dangerous because we don't read or write from this account
-    #[account(mut)]
+    #[account(
+        mut,
+        constraint = service_fee_account.mint.key() == client_token_account.mint.key()
+    )]
     pub service_fee_account: Box<Account<'info, TokenAccount>>,
     #[account(
         mut,
         constraint = client_token_account.amount >= (amount + service_fee + checker_fee)
     )]
     pub client_token_account: Box<Account<'info, TokenAccount>>,
+    #[account(
+        constraint = client_service_token_account.owner.key() == *client.to_account_info().key
+    )]
+    pub client_service_token_account: Box<Account<'info, TokenAccount>>,
      /// CHECK: This is not dangerous because we don't read or write from this account
     #[account(mut)]
     pub executor_token_account: Box<Account<'info, TokenAccount>>,
@@ -381,10 +395,14 @@ impl<'info> Finish<'info> {
 
 #[error_code]
 pub enum ErrorCode {
-    #[msg("Deal already started")]
+    #[msg("The deal already started")]
     AlreadyStarted,
-    #[msg("Deal not started")]
+    #[msg("Th deal not started")]
     NotStarted,
-    #[msg("Fee is too low")]
-    FeeIsTooLow
+    #[msg("The fee is too low")]
+    FeeIsTooLow,
+    #[msg("Holder mode unavailable")]
+    HolderModeUnavailable,
+    #[msg("The amount is too small.")]
+    AmountTooLow
 }
