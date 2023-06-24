@@ -4,126 +4,47 @@ import { PublicKey, Keypair, SystemProgram, Transaction, Commitment } from '@sol
 import { TOKEN_PROGRAM_ID, createMint, createAccount, mintTo, getAccount } from "@solana/spl-token";
 import { DealContract } from "../target/types/deal_contract";
 import { assert } from "chai";
+import { v4 as uuid } from 'uuid'
 import * as fs from 'fs';
 
-describe("Test deal contract with SPL token", () => {
+describe("🤖 Test Contractus smart-contract", () => {
   const commitment: Commitment = 'processed';
   const options = AnchorProvider.defaultOptions();
   const program = anchor.workspace.DealContract as Program<DealContract>;
-
   const provider = anchor.AnchorProvider.env()
-
   anchor.setProvider(provider)
-  const amount = 1000;
-  const service_fee = 50;
-  const clientTokenBalance = 10000;
-  const otherTokenBalance = 500;
-  const serviceFeeTokenBalance = 0;
 
-  const dealAccount = anchor.web3.Keypair.generate();
-  const payer = anchor.web3.Keypair.generate();
-  const mintAuthority = anchor.web3.Keypair.generate();
+  describe("👽️ Deals with third party checker (no performance bond)", ()=> {
+    const clientTokenBalance = 10000;
+    const otherTokenBalance = 500;
+    const serviceFeeTokenBalance = 0;
 
-  const clientAccount = anchor.web3.Keypair.generate();
-  const executorAccount = anchor.web3.Keypair.generate();
-  const checkerAccount = anchor.web3.Keypair.generate();
-  const serviceFeeAccount = anchor.web3.Keypair.generate();
-  const mintServiceAuthority = anchor.web3.Keypair.generate();
-  const mintServiceKeypair: Keypair = (() => {
-    let secret: Uint8Array = JSON.parse(fs.readFileSync(process.env.MINT_KEY_PATH, 'utf-8'))
-    return Keypair.fromSecretKey(new Uint8Array(secret))
-  })()
+    const dealAccount = anchor.web3.Keypair.generate();
+    const payer = anchor.web3.Keypair.generate();
+    const mintAuthority = anchor.web3.Keypair.generate();
 
-  var mint;
+    const clientAccount = anchor.web3.Keypair.generate();
+    const executorAccount = anchor.web3.Keypair.generate();
+    const checkerAccount = anchor.web3.Keypair.generate();
+    const serviceFeeAccount = anchor.web3.Keypair.generate();
+    const mintServiceAuthority = anchor.web3.Keypair.generate();
+    const mintServiceKeypair: Keypair = (() => {
+      let secret: Uint8Array = JSON.parse(fs.readFileSync(process.env.MINT_KEY_PATH, 'utf-8'))
+      return Keypair.fromSecretKey(new Uint8Array(secret))
+    })()
 
-  var clientTokenAccount;
-  var executorTokenAccount;
-  var checkerTokenAccount;
-  var serviceFeeTokenAccount;
+    var mint;
 
-  var mintService;
-  var clientServiceTokenAccount;
-  var serviceFeeServiceTokenAccount;
+    var clientTokenAccount;
+    var executorTokenAccount;
+    var checkerTokenAccount;
+    var serviceFeeTokenAccount;
 
-  const initDealWithParams = async (
-    dealId,
-    amount,
-    checkerFee,
-    serviceFee,
-    clientAccount,
-    executorAccount,
-    checkerAccount,
-    payer,
-    serviceFeeTokenAccount,
-    clientTokenAccount,
-    clientServiceTokenAccount,
-    executorTokenAccount,
-    checkerTokenAccount,
-    mint) => {
-    const seed = Buffer.from(anchor.utils.bytes.utf8.encode(dealId))
+    var mintService;
+    var clientServiceTokenAccount;
+    var serviceFeeServiceTokenAccount;
 
-    const [_vault_account_pda, _vault_account_bump] = await PublicKey.findProgramAddress(
-      [seed, Buffer.from(anchor.utils.bytes.utf8.encode("deposit"))],
-      program.programId
-    );
-    var vault_account_pda = _vault_account_pda;
-    var vault_account_bump = _vault_account_bump;
-
-    const [_vault_authority_pda, _vault_authority_bump] = await PublicKey.findProgramAddress(
-      [seed, Buffer.from(anchor.utils.bytes.utf8.encode("auth"))],
-      program.programId
-    );
-
-    const [_state_account_pda, _state_account_bump] = await PublicKey.findProgramAddress(
-      [seed, Buffer.from(anchor.utils.bytes.utf8.encode("state"))],
-      program.programId
-    );
-
-    var state_account_bump = _state_account_bump
-    var state_account_pda = _state_account_pda
-
-    var vault_authority_pda = _vault_authority_pda;
-    await program.methods.initialize(
-      vault_account_bump,
-      state_account_bump,
-      seed,
-      new anchor.BN(amount),
-      new anchor.BN(serviceFee),
-      new anchor.BN(checkerFee)
-    )
-      .accounts({
-        client: clientAccount.publicKey,
-        executor: executorAccount.publicKey,
-        checker: checkerAccount.publicKey,
-        payer: payer.publicKey,
-        serviceFeeAccount: serviceFeeTokenAccount,
-        clientTokenAccount: clientTokenAccount,
-        clientServiceTokenAccount: clientServiceTokenAccount,
-        executorTokenAccount: executorTokenAccount,
-        checkerTokenAccount: checkerTokenAccount,
-        mint: mint,
-        depositAccount: vault_account_pda,
-        dealState: state_account_pda,
-        systemProgram: anchor.web3.SystemProgram.programId,
-        rent: anchor.web3.SYSVAR_RENT_PUBKEY,
-        tokenProgram: TOKEN_PROGRAM_ID,
-
-      })
-      .signers([clientAccount, executorAccount, checkerAccount, payer])
-      .rpc()
-
-    return {
-      vault_account_pda,
-      state_account_pda,
-      vault_account_bump,
-      state_account_bump,
-      vault_authority_pda,
-      seed
-    }
-  }
-
-  const initDeal = async (dealId, checkerFee, serviceFee) => {
-    return await initDealWithParams(
+    const _createDeal = async (
       dealId,
       amount,
       checkerFee,
@@ -137,370 +58,923 @@ describe("Test deal contract with SPL token", () => {
       clientServiceTokenAccount,
       executorTokenAccount,
       checkerTokenAccount,
-      mint)
-  }
-
-  it("Initialize state", async () => {
-
-    await provider.connection.confirmTransaction(
-      await provider.connection.requestAirdrop(payer.publicKey, 2000000000),
-      "processed"
-    );
-
-    await provider.sendAndConfirm((() => {
-      const tx = new Transaction();
-      tx.add(
-        SystemProgram.transfer({
-          fromPubkey: payer.publicKey,
-          toPubkey: clientAccount.publicKey,
-          lamports: 100000000,
-        })
+      mint,
+      holderMint,
+      holderMode
+    ) => {
+      const seed = Buffer.from(anchor.utils.bytes.utf8.encode(dealId)).subarray(0, 32)
+  
+      const [_vault_account_pda, _vault_account_bump] = await PublicKey.findProgramAddress(
+        [seed, Buffer.from(anchor.utils.bytes.utf8.encode("deposit")), clientAccount.publicKey.toBuffer(),  executorAccount.publicKey.toBuffer()],
+       
+        program.programId
       );
-      return tx;
-    })(), [payer])
-    const accountInfo = await provider.connection.getAccountInfo(
-      clientAccount.publicKey
-    )
-    assert.ok(accountInfo.lamports == 100000000)
-    mint = await createMint(
-      provider.connection,
-      payer,
-      mintAuthority.publicKey,
-      null,
-      0);
-
-    mintService = await createMint(
-      provider.connection,
-      payer,
-      mintServiceAuthority.publicKey,
-      null,
-      0, 
-      mintServiceKeypair);
-
-    clientTokenAccount = await createAccount(provider.connection, payer, mint, clientAccount.publicKey, null, null, TOKEN_PROGRAM_ID);
-    executorTokenAccount = await createAccount(provider.connection, payer, mint, executorAccount.publicKey, null, null, TOKEN_PROGRAM_ID);
-    checkerTokenAccount = await createAccount(provider.connection, payer, mint, checkerAccount.publicKey, null, null, TOKEN_PROGRAM_ID);
-    serviceFeeTokenAccount = await createAccount(provider.connection, payer, mint, serviceFeeAccount.publicKey, null, null, TOKEN_PROGRAM_ID);
-
-    clientServiceTokenAccount = await createAccount(provider.connection, payer, mintService, clientAccount.publicKey, null, null, TOKEN_PROGRAM_ID);
-    serviceFeeServiceTokenAccount = await createAccount(provider.connection, payer, mintService, serviceFeeAccount.publicKey, null, null, TOKEN_PROGRAM_ID);
-
-    await mintTo(provider.connection, payer, mint, clientTokenAccount, mintAuthority.publicKey, clientTokenBalance, [mintAuthority])
-    await mintTo(provider.connection, payer, mint, executorTokenAccount, mintAuthority.publicKey, otherTokenBalance, [mintAuthority])
-    await mintTo(provider.connection, payer, mint, checkerTokenAccount, mintAuthority.publicKey, otherTokenBalance, [mintAuthority])
-    await mintTo(provider.connection, payer, mint, serviceFeeTokenAccount, mintAuthority.publicKey, serviceFeeTokenBalance, [mintAuthority])
-
-    const clientTokenAccountInfo = await getAccount(
-      provider.connection,
-      clientTokenAccount
-    )
-    const executorTokenAccountInfo = await getAccount(
-      provider.connection,
-      executorTokenAccount
-    )
-    const checkerTokenAccountInfo = await getAccount(
-      provider.connection,
-      checkerTokenAccount
-    )
-
-    assert.ok(clientTokenAccountInfo.mint.toBase58() == mint.toBase58())
-    assert.ok(clientTokenAccountInfo.amount.toString() == clientTokenBalance.toString())
-    assert.ok(executorTokenAccountInfo.amount.toString() == otherTokenBalance.toString())
-    assert.ok(checkerTokenAccountInfo.amount.toString() == otherTokenBalance.toString())
-  });
-
-  it("Initialize deal", async () => {
-
-    const dealId = "12312456"
-    const fee = 100
-    let data = await initDeal(dealId, fee, service_fee)
-
-    const state = await program.account.dealState.fetch(data.state_account_pda)
-    const serviceFeeTokenAccountInfo = await getAccount(
-      provider.connection,
-      serviceFeeTokenAccount
-    )
-
-    assert.ok(serviceFeeTokenAccountInfo.amount.toString() == service_fee.toString())
-    assert.ok(state.amount.toNumber().toString() == amount.toString())
-    assert.ok(state.clientKey.toBase58() == clientAccount.publicKey.toBase58())
-    assert.ok(state.executorKey.toBase58() == executorAccount.publicKey.toBase58())
-
-    // Try call Init again
-    try {
-      let _ = await initDeal(dealId, fee, service_fee)
-      assert.ok(false)
-    } catch {
-      assert.ok(true)
+      const [holder_vault_account_pda, _holder_vault_account_bump] = await PublicKey.findProgramAddress(
+        [seed, Buffer.from(anchor.utils.bytes.utf8.encode("holder_deposit")), clientAccount.publicKey.toBuffer(),  executorAccount.publicKey.toBuffer()],
+        program.programId
+      );
+      var vault_account_pda = _vault_account_pda;
+      var vault_account_bump = _vault_account_bump;
+  
+      const [vault_authority_pda, _vault_authority_bump] = await PublicKey.findProgramAddress(
+        [seed, Buffer.from(anchor.utils.bytes.utf8.encode("auth")), clientAccount.publicKey.toBuffer(),  executorAccount.publicKey.toBuffer()],
+        program.programId
+      );
+  
+      const [state_account_pda, _state_account_bump] = await PublicKey.findProgramAddress(
+        [seed, Buffer.from(anchor.utils.bytes.utf8.encode("state")), clientAccount.publicKey.toBuffer(),  executorAccount.publicKey.toBuffer()],
+        program.programId
+      );
+  
+      await program.methods.initializeWithChecker(
+        seed,
+        new anchor.BN(amount),
+        new anchor.BN(serviceFee),
+        new anchor.BN(checkerFee),
+        holderMode
+      )
+        .accounts({
+          client: clientAccount.publicKey,
+          executor: executorAccount.publicKey,
+          checker: checkerAccount.publicKey,
+          payer: payer.publicKey,
+          serviceFeeAccount: serviceFeeTokenAccount,
+          clientTokenAccount: clientTokenAccount,
+          clientServiceTokenAccount: clientServiceTokenAccount,
+          executorTokenAccount: executorTokenAccount,
+          checkerTokenAccount: checkerTokenAccount,
+          mint: mint,
+          authority: vault_authority_pda,
+          depositAccount: vault_account_pda,
+          dealState: state_account_pda,
+          holderDepositAccount: holder_vault_account_pda,
+          holderMint: holderMint.publicKey,
+          systemProgram: anchor.web3.SystemProgram.programId,
+          rent: anchor.web3.SYSVAR_RENT_PUBKEY,
+          tokenProgram: TOKEN_PROGRAM_ID,
+  
+        })
+        .signers([clientAccount, executorAccount, checkerAccount, payer])
+        .rpc()
+  
+      return {
+        vault_account_pda,
+        state_account_pda,
+        vault_account_bump,
+        vault_authority_pda,
+        seed,
+        holder_vault_account_pda
+      }
     }
-  });
 
-  it("Finish deal", async () => {
-    let dealId = "123456789"
-    let fee = 100
-    let data = await initDeal(dealId, fee, service_fee)
+    const createDeal = async (dealId, amount, checkerFee, serviceFee, holderMode) => {
+      return await _createDeal(
+        dealId,
+        amount,
+        checkerFee,
+        serviceFee,
+        clientAccount,
+        executorAccount,
+        checkerAccount,
+        payer,
+        serviceFeeTokenAccount,
+        clientTokenAccount,
+        clientServiceTokenAccount,
+        executorTokenAccount,
+        checkerTokenAccount,
+        mint, 
+        mintServiceKeypair,
+        holderMode)
+    }
+
+    before( async()=>{
+      await provider.connection.confirmTransaction(
+        await provider.connection.requestAirdrop(payer.publicKey, 2000000000),
+        "processed"
+      );
+  
+      await provider.sendAndConfirm((() => {
+        const tx = new Transaction();
+        tx.add(
+          SystemProgram.transfer({
+            fromPubkey: payer.publicKey,
+            toPubkey: clientAccount.publicKey,
+            lamports: 100000000,
+          })
+        );
+        return tx;
+      })(), [payer])
+      const accountInfo = await provider.connection.getAccountInfo(
+        clientAccount.publicKey
+      )
+      assert.ok(accountInfo.lamports == 100000000)
+      mint = await createMint(
+        provider.connection,
+        payer,
+        mintAuthority.publicKey,
+        null,
+        0);
+
+      mintService = await createMint(
+        provider.connection,
+        payer,
+        mintServiceAuthority.publicKey,
+        null,
+        0, 
+        mintServiceKeypair);
+  
+      clientTokenAccount = await createAccount(provider.connection, payer, mint, clientAccount.publicKey, null, null, TOKEN_PROGRAM_ID);
+      executorTokenAccount = await createAccount(provider.connection, payer, mint, executorAccount.publicKey, null, null, TOKEN_PROGRAM_ID);
+      checkerTokenAccount = await createAccount(provider.connection, payer, mint, checkerAccount.publicKey, null, null, TOKEN_PROGRAM_ID);
+      serviceFeeTokenAccount = await createAccount(provider.connection, payer, mint, serviceFeeAccount.publicKey, null, null, TOKEN_PROGRAM_ID);
+   
+      clientServiceTokenAccount = await createAccount(provider.connection, payer, mintService, clientAccount.publicKey, null, null, TOKEN_PROGRAM_ID);
+      serviceFeeServiceTokenAccount = await createAccount(provider.connection, payer, mintService, serviceFeeAccount.publicKey, null, null, TOKEN_PROGRAM_ID);
+  
+      await mintTo(provider.connection, payer, mint, clientTokenAccount, mintAuthority.publicKey, clientTokenBalance, [mintAuthority])
+      await mintTo(provider.connection, payer, mint, executorTokenAccount, mintAuthority.publicKey, otherTokenBalance, [mintAuthority])
+      await mintTo(provider.connection, payer, mint, checkerTokenAccount, mintAuthority.publicKey, otherTokenBalance, [mintAuthority])
+      await mintTo(provider.connection, payer, mint, serviceFeeTokenAccount, mintAuthority.publicKey, serviceFeeTokenBalance, [mintAuthority])
+  
+    })
+
+    it("Validating state", async () => {
+
+      const clientTokenAccountInfo = await getAccount(
+        provider.connection,
+        clientTokenAccount
+      )
+      const executorTokenAccountInfo = await getAccount(
+        provider.connection,
+        executorTokenAccount
+      )
+      const checkerTokenAccountInfo = await getAccount(
+        provider.connection,
+        checkerTokenAccount
+      )
+  
+      assert.ok(clientTokenAccountInfo.mint.toBase58() == mint.toBase58())
+      assert.ok(clientTokenAccountInfo.amount.toString() == clientTokenBalance.toString())
+      assert.ok(executorTokenAccountInfo.amount.toString() == otherTokenBalance.toString())
+      assert.ok(checkerTokenAccountInfo.amount.toString() == otherTokenBalance.toString())
+    });
+
+    it("Create deal", async () => {
+
+      const dealId = uuid()
+      const fee = 100
+      const amount = 1000
+      const serviceFee = 50
+      let data = await createDeal(dealId, amount, fee, serviceFee, false)
+     
+      const state = await program.account.dealState.fetch(data.state_account_pda)
+  
+      const serviceFeeTokenAccountInfo = await getAccount(
+        provider.connection,
+        serviceFeeTokenAccount
+      )
+  
+      const depositInfo = await getAccount(
+        provider.connection,
+        data.vault_account_pda
+      )
+  
+      assert.ok(serviceFeeTokenAccountInfo.amount.toString() == serviceFee.toString())
+      assert.ok(state.amount.toNumber().toString() == amount.toString())
+      assert.ok(state.clientKey.toBase58() == clientAccount.publicKey.toBase58())
+      assert.ok(state.executorKey.toBase58() == executorAccount.publicKey.toBase58())
+    });
+
+    it("Try recreate deal with same ID", async () => {
 
 
-    const state = await program.account.dealState.fetch(data.state_account_pda)
+      var serviceFeeTokenAccountInfo = await getAccount(
+        provider.connection,
+        serviceFeeTokenAccount
+      )
+      const amountBefore = serviceFeeTokenAccountInfo.amount
+      const dealId = uuid()
+      const fee = 100
+      const amount = 1000
+      const serviceFee = 50
+      let data = await createDeal(dealId, amount, fee, serviceFee, false)
+     
+      const state = await program.account.dealState.fetch(data.state_account_pda)
+  
+      serviceFeeTokenAccountInfo = await getAccount(
+        provider.connection,
+        serviceFeeTokenAccount
+      )
+  
+      const depositInfo = await getAccount(
+        provider.connection,
+        data.vault_account_pda
+      )
+  
+      assert.ok(serviceFeeTokenAccountInfo.amount.toString() == (amountBefore + BigInt(serviceFee)).toString())
+      assert.ok(state.amount.toNumber().toString() == amount.toString())
+      assert.ok(state.clientKey.toBase58() == clientAccount.publicKey.toBase58())
+      assert.ok(state.executorKey.toBase58() == executorAccount.publicKey.toBase58())
+  
+      // Try call Init again
+      try {
+        let _ = await createDeal(dealId, amount, fee, serviceFee, false)
+        assert.ok(false)
+      } catch {
+        assert.ok(true)
+      }
+    });
 
-    const depositAccount = await getAccount(
-      provider.connection,
-      state.depositKey
-    )
+    it("Create deal and finish", async () => {
 
-    const clientTokenAccountInfoBefore = await getAccount(
-      provider.connection,
-      clientTokenAccount
-    )
+      const dealId = uuid()
+      const fee = 100
+      const amount = 1000
+      const serviceFee = 50
+      let data = await createDeal(dealId, amount, fee, serviceFee, false)
+  
+      const state = await program.account.dealState.fetch(data.state_account_pda)
+  
+      const depositAccount = await getAccount(
+        provider.connection,
+        state.depositKey
+      )
 
-    const executorTokenAccountInfoBefore = await getAccount(
-      provider.connection,
-      executorTokenAccount
-    )
+      assert.ok(Number(depositAccount.amount) == Number(amount + fee))
 
-    await program.methods
-      .finish(data.seed)
-      .accounts({
-        initializer: checkerAccount.publicKey,
-        authority: data.vault_authority_pda,
-        depositAccount: data.vault_account_pda,
-        executorTokenAccount: executorTokenAccount,
-        checkerTokenAccount: checkerTokenAccount,
-        dealState: data.state_account_pda,
-        tokenProgram: TOKEN_PROGRAM_ID,
+      const clientTokenAccountInfoBefore = await getAccount(
+        provider.connection,
+        clientTokenAccount
+      )
+
+      await program.methods
+        .finish(data.seed)
+        .accounts({
+          initializer: checkerAccount.publicKey,
+          depositAccount: data.vault_account_pda,
+          executorTokenAccount: executorTokenAccount,
+          holderDepositAccount: data.holder_vault_account_pda,
+          authority: data.vault_authority_pda,
+          checkerTokenAccount: checkerTokenAccount,
+          dealState: data.state_account_pda,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([checkerAccount])
+        .rpc()
+  
+      const clientTokenAccountInfo = await getAccount(
+        provider.connection,
+        clientTokenAccount
+      )
+  
+      const executorTokenAccountInfo = await getAccount(
+        provider.connection,
+        executorTokenAccount
+      )
+  
+      const checkerTokenAccountInfo = await getAccount(
+        provider.connection,
+        checkerTokenAccount
+      )
+  
+      assert.ok(clientTokenAccountInfoBefore.amount.toString() == clientTokenAccountInfo.amount.toString())
+      assert.ok(executorTokenAccountInfo.amount.toString() == (Number(otherTokenBalance) + amount).toString())
+      assert.ok(checkerTokenAccountInfo.amount.toString() == (Number(otherTokenBalance) + fee).toString())
+  
+    });
+
+    it("Create deal and cancel", async () => {
+
+      const dealId = uuid()
+      const checkerFee = 100
+      const amount = 1000
+      const serviceFee = 50
+      let data = await createDeal(dealId, amount, checkerFee, serviceFee, false)
+    
+
+      const state = await program.account.dealState.fetch(data.state_account_pda)
+
+      const depositAccount = await getAccount(
+        provider.connection,
+        state.depositKey
+      )
+
+      const clientTokenAccountInfoBefore = await getAccount(
+        provider.connection,
+        clientTokenAccount
+      )
+      assert.ok(depositAccount.amount.toString() == (amount + checkerFee).toString())
+      assert.ok(state.checkerFee.toString() == new anchor.BN(checkerFee).toString())
+      assert.ok(state.amount.toNumber().toString() == amount.toString())
+      assert.ok(state.clientKey.toBase58() == clientAccount.publicKey.toBase58())
+      assert.ok(state.executorKey.toBase58() == executorAccount.publicKey.toBase58())
+
+      await program.methods
+        .cancel(data.seed)
+        .accounts({
+          initializer: checkerAccount.publicKey,
+          depositAccount: data.vault_account_pda,
+          authority: data.vault_authority_pda,
+          clientTokenAccount: clientTokenAccount,
+          dealState: data.state_account_pda,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([checkerAccount])
+        .rpc()
+
+      const clientTokenAccountInfo = await getAccount(
+        provider.connection,
+        clientTokenAccount
+      )
+      assert.ok((Number(clientTokenAccountInfoBefore.amount) + Number(amount + checkerFee)).toString() == clientTokenAccountInfo.amount.toString())
+    });
+
+    it("Try create deal with the same executor and client", async () => {
+      var promise = _createDeal(
+        uuid(),
+        1000,
+        0,
+        100,
+        clientAccount,
+        clientAccount,
+        checkerAccount,
+        payer,
+        serviceFeeTokenAccount,
+        clientTokenAccount,
+        clientServiceTokenAccount,
+        clientTokenAccount,
+        checkerTokenAccount,
+        mint, 
+        mintServiceKeypair, 
+        false)
+      promise.then(() => {
+        assert.ok(false)
+      }).catch((error) => {
+        assert.ok(error.error.errorCode.code == "ConstraintRaw")
       })
-      .signers([checkerAccount])
-      .rpc()
+    })
 
-    const clientTokenAccountInfo = await getAccount(
-      provider.connection,
-      clientTokenAccount
-    )
-
-    const executorTokenAccountInfo = await getAccount(
-      provider.connection,
-      executorTokenAccount
-    )
-
-    const checkerTokenAccountInfo = await getAccount(
-      provider.connection,
-      checkerTokenAccount
-    )
-
-    assert.ok(Number(clientTokenAccountInfoBefore.amount).toString() == clientTokenAccountInfo.amount.toString())
-    assert.ok((Number(executorTokenAccountInfo.amount)).toString() == (Number(otherTokenBalance) + amount).toString())
-    assert.ok((Number(checkerTokenAccountInfo.amount)).toString() == (Number(otherTokenBalance) + fee).toString())
-
-  });
-
-  it("Cancel deal", async () => {
-
-    let dealId = "12345678"
-    let checkerFee = 100
-    let data = await initDeal(dealId, checkerFee, service_fee)
-
-    const state = await program.account.dealState.fetch(data.state_account_pda)
-
-    const depositAccount = await getAccount(
-      provider.connection,
-      state.depositKey
-    )
-
-    const clientTokenAccountInfoBefore = await getAccount(
-      provider.connection,
-      clientTokenAccount
-    )
-    assert.ok(depositAccount.amount.toString() == (amount + checkerFee).toString())
-    assert.ok(state.checkerFee.toString() == new anchor.BN(checkerFee).toString())
-    assert.ok(state.amount.toNumber().toString() == amount.toString())
-    assert.ok(state.clientKey.toBase58() == clientAccount.publicKey.toBase58())
-    assert.ok(state.executorKey.toBase58() == executorAccount.publicKey.toBase58())
-
-    await program.methods
-      .cancel(data.seed)
-      .accounts({
-        initializer: checkerAccount.publicKey,
-        authority: data.vault_authority_pda,
-        depositAccount: data.vault_account_pda,
-        clientTokenAccount: clientTokenAccount,
-        dealState: data.state_account_pda,
-        tokenProgram: TOKEN_PROGRAM_ID,
+    it("Try create deal with the zero fee (holder mode off)", async () => {
+      let promise = createDeal(uuid(), 1000, 0, 0, false)
+      promise.then(() => {
+        assert.ok(false)
+      }).catch((error) => {
+        // TODO: - Add validation by errorCode
+        assert.ok(true)
       })
-      .signers([checkerAccount])
-      .rpc()
+    })
 
-    const clientTokenAccountInfo = await getAccount(
-      provider.connection,
-      clientTokenAccount
-    )
-    assert.ok((Number(clientTokenAccountInfoBefore.amount) + Number(amount + checkerFee)).toString() == clientTokenAccountInfo.amount.toString())
-  });
+    it("Try create deal with the zero fee (holder mode on, but not fund)", async () => {
+      try {
+        await _createDeal(
+          uuid(),
+          1000,
+          0,
+          0,
+          clientAccount,
+          executorAccount,
+          checkerAccount,
+          payer,
+          serviceFeeTokenAccount,
+          clientServiceTokenAccount,
+          clientServiceTokenAccount,
+          executorTokenAccount,
+          checkerTokenAccount,
+          mintService,
+          mintServiceKeypair, 
+          true)
+      } catch(error) {
+        // TODO: - Add validation by errorCode
+        assert.ok(true)
+      }
+    })
 
-  it("Try start deal with the same executor and client", async () => {
-    var promise = initDealWithParams(
-      "1234",
+    it("Create deal with ivalid client token account", async () => {
+      try {
+        await _createDeal(
+          uuid(),
+          1000,
+          0,
+          0,
+          clientAccount,
+          executorAccount,
+          checkerAccount,
+          payer,
+          serviceFeeTokenAccount,
+          executorTokenAccount, // <- Invalid here
+          clientServiceTokenAccount,
+          executorTokenAccount,
+          checkerTokenAccount,
+          mintService, mintServiceKeypair, 
+          false)
+          assert.ok(false)
+      } catch(error) {
+        // TODO: - Add validation by errorCode
+        assert.ok(true)
+      }
+      
+    })
+
+    it("Create deal with zero amount, fee and service fee with custom token", async () => {
+
+      let amount = 0
+      
+      try {
+        await _createDeal(
+          uuid(),
+          amount,
+          0,
+          0,
+          clientAccount,
+          executorAccount,
+          checkerAccount,
+          payer,
+          serviceFeeTokenAccount,
+          clientTokenAccount,
+          clientServiceTokenAccount,
+          executorTokenAccount,
+          checkerTokenAccount,
+          mintService, 
+          mintServiceKeypair, 
+          false)
+          assert.ok(false)
+      } catch(error) {
+        // TODO: - Add validation by errorCode
+        assert.ok(true)
+      }
+    })
+
+    it("Create deal with zero service fee with custom token", async () => {
+
+      let amount = 1000
+
+      try {
+        await _createDeal(
+          uuid(),
+          amount,
+          0,
+          0,
+          clientAccount,
+          executorAccount,
+          checkerAccount,
+          payer,
+          serviceFeeTokenAccount,
+          clientTokenAccount,
+          clientServiceTokenAccount,
+          executorTokenAccount,
+          checkerTokenAccount,
+          mint, mintServiceKeypair, 
+          false)
+          assert.ok(false)
+      } catch(error) {
+        // TODO: - Add validation by errorCode
+        assert.ok(true)
+      }
+    })
+  
+  })
+
+  describe("👻 Deals with performance bond (no checker)", ()=> {
+    const amount = 1000;
+    const service_fee = 50;
+    const clientTokenBalance = 10000;
+    const otherTokenBalance = 500;
+    const serviceFeeTokenBalance = 0;
+    const bondTokenBalance = 0;
+
+    const dealAccount = anchor.web3.Keypair.generate();
+    const payer = anchor.web3.Keypair.generate();
+    const mintAuthority = anchor.web3.Keypair.generate();
+
+    const clientAccount = anchor.web3.Keypair.generate();
+    const executorAccount = anchor.web3.Keypair.generate();
+    const checkerAccount = anchor.web3.Keypair.generate();
+    const serviceFeeAccount = anchor.web3.Keypair.generate();
+    const mintServiceAuthority = anchor.web3.Keypair.generate();
+    const bondMintAuthority = anchor.web3.Keypair.generate();
+    const mintServiceKeypair: Keypair = (() => {
+      let secret: Uint8Array = JSON.parse(fs.readFileSync(process.env.MINT_KEY_PATH, 'utf-8'))
+      return Keypair.fromSecretKey(new Uint8Array(secret))
+    })()
+
+    var mint;
+    var mintBond;
+
+    var clientTokenAccount;
+    var executorTokenAccount;
+    var checkerTokenAccount;
+    var serviceFeeTokenAccount;
+
+    var bondClientTokenAccount;
+    var bondExecutorTokenAccount;
+
+    var mintService;
+    var clientServiceTokenAccount;
+    var serviceFeeServiceTokenAccount;
+
+    const createDeal = async (
+      dealId,
       amount,
-      0,
-      100,
+      clientBondAmount,
+      executorBondAmount,
+      serviceFee,
       clientAccount,
-      clientAccount,
-      checkerAccount,
+      executorAccount,
       payer,
       serviceFeeTokenAccount,
       clientTokenAccount,
       clientServiceTokenAccount,
-      clientTokenAccount,
-      checkerTokenAccount,
-      mint)
-    promise.then(() => {
-      assert.ok(false)
-    }).catch(() => {
-      assert.ok(true)
-    })
-  })
-
-  it("Try start deal with the zero fee", async () => {
-    let promise = initDeal('1234500', 0, 0)
-    promise.then(() => {
-      assert.ok(false)
-    }).catch((error) => {
-      assert.ok(true)
-    })
-  })
-
-  it("Start deal with zero fee. Payment by service token", async () => {
-    let holder_mode_amount = 10000
-    let amount = 1000
-    try {
-      await initDealWithParams(
-        "1234",
-        amount,
-        0,
-        0,
-        clientAccount,
-        executorAccount,
-        checkerAccount,
-        payer,
-        serviceFeeTokenAccount,
-        clientServiceTokenAccount,
-        clientServiceTokenAccount,
-        executorTokenAccount,
-        checkerTokenAccount,
-        mintService)
-        assert.ok(false)
-        return
-    } catch { }
-    
-    await mintTo(provider.connection, payer, mintService, clientServiceTokenAccount, mintServiceAuthority.publicKey, holder_mode_amount, [mintServiceAuthority])
-    const clientTokenAccountInfo = await getAccount(
-      provider.connection,
-      clientServiceTokenAccount
-    )
-
-    assert.ok(clientTokenAccountInfo.mint.toBase58() == mintService.toBase58())
-    assert.ok(clientTokenAccountInfo.amount.toString() == holder_mode_amount.toString())
-    let data = await initDealWithParams(
-      "1234",
-      amount,
-      0,
-      0,
-      clientAccount,
-      executorAccount,
-      checkerAccount,
-      payer,
-      serviceFeeServiceTokenAccount,
-      clientServiceTokenAccount,
-      clientServiceTokenAccount,
       executorTokenAccount,
-      checkerTokenAccount,
-      mintService)
+      clientBondTokenAccount,
+      clientBondMint,
+      executorBondTokenAccount,
+      executorBondMint,
+      mint,
+      holderMint,
+      holderMode,
+      deadline
+      ) => {
+      const seed = Buffer.from(anchor.utils.bytes.utf8.encode(dealId)).subarray(0, 32)
 
-      const state = await program.account.dealState.fetch(data.state_account_pda)
+      const [_vault_account_pda, _vault_account_bump] = await PublicKey.findProgramAddress(
+        [seed, Buffer.from(anchor.utils.bytes.utf8.encode("deposit")), clientAccount.publicKey.toBuffer(), executorAccount.publicKey.toBuffer()],
+        program.programId
+      );
+      const [_holder_vault_account_pda, _holder_vault_account_bump] = await PublicKey.findProgramAddress(
+        [seed, Buffer.from(anchor.utils.bytes.utf8.encode("holder_deposit")), clientAccount.publicKey.toBuffer(), executorAccount.publicKey.toBuffer()],
+        program.programId
+      );
+      var vault_account_pda = _vault_account_pda;
+      var vault_account_bump = _vault_account_bump;
+
+      const [_vault_authority_pda, _vault_authority_bump] = await PublicKey.findProgramAddress(
+        [seed, Buffer.from(anchor.utils.bytes.utf8.encode("auth")), clientAccount.publicKey.toBuffer(), executorAccount.publicKey.toBuffer()],
+        program.programId
+      );
+
+      const [_state_account_pda, _state_account_bump] = await PublicKey.findProgramAddress(
+        [seed, Buffer.from(anchor.utils.bytes.utf8.encode("state")), clientAccount.publicKey.toBuffer(), executorAccount.publicKey.toBuffer()],
+        program.programId
+      );
+
+      const [executor_bond_vault_account_pda, _executor_bond_vault_account_bump] = await PublicKey.findProgramAddress(
+        [seed, Buffer.from(anchor.utils.bytes.utf8.encode("deposit_bond_executor")), clientAccount.publicKey.toBuffer(), executorAccount.publicKey.toBuffer()],
+        program.programId
+      );
+
+      const [client_bond_vault_account_pda, _client_bond_vault_account_bump] = await PublicKey.findProgramAddress(
+        [seed, Buffer.from(anchor.utils.bytes.utf8.encode("deposit_bond_client")), clientAccount.publicKey.toBuffer(), executorAccount.publicKey.toBuffer()],
+        program.programId
+      );
+
+      var state_account_bump = _state_account_bump
+      var state_account_pda = _state_account_pda
+
+      var vault_authority_pda = _vault_authority_pda;
+      await program.methods.initializeWithBond(
+        seed,
+        new anchor.BN(amount),
+        new anchor.BN(clientBondAmount),
+        new anchor.BN(executorBondAmount),
+        new anchor.BN(serviceFee),
+        new anchor.BN(deadline),
+        holderMode
+      ).accounts({
+          client: clientAccount.publicKey,
+          executor: executorAccount.publicKey,
+          payer: payer.publicKey,
+          serviceFeeAccount: serviceFeeTokenAccount,
+          clientTokenAccount: clientTokenAccount,
+          clientServiceTokenAccount: clientServiceTokenAccount,
+          executorTokenAccount: executorTokenAccount,
+          clientBondAccount: clientBondTokenAccount,
+          executorBondAccount: executorBondTokenAccount,
+          clientBondMint: clientBondMint,
+          executorBondMint: executorBondMint,
+          authority: _vault_authority_pda,
+          mint: mint,
+          depositAccount: vault_account_pda,
+          dealState: state_account_pda,
+          holderDepositAccount: _holder_vault_account_pda,
+          holderMint: holderMint,
+          depositClientBondAccount: client_bond_vault_account_pda,
+          depositExecutorBondAccount: executor_bond_vault_account_pda,
+          systemProgram: anchor.web3.SystemProgram.programId,
+          rent: anchor.web3.SYSVAR_RENT_PUBKEY,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([clientAccount, executorAccount, payer])
+        .rpc()
+
+      return {
+        vault_account_pda,
+        state_account_pda,
+        vault_account_bump,
+        state_account_bump,
+        vault_authority_pda,
+        seed,
+        executor_bond_vault_account_pda,
+        client_bond_vault_account_pda
+      }
+    }
+
+  
+    before(async () => {
+      await provider.connection.confirmTransaction(
+        await provider.connection.requestAirdrop(payer.publicKey, 2000000000),
+        "processed"
+      );
+
+      await provider.sendAndConfirm((() => {
+        const tx = new Transaction();
+        tx.add(
+          SystemProgram.transfer({
+            fromPubkey: payer.publicKey,
+            toPubkey: clientAccount.publicKey,
+            lamports: 100000000,
+          })
+        );
+        return tx;
+      })(), [payer])
+      const accountInfo = await provider.connection.getAccountInfo(
+        clientAccount.publicKey
+      )
+      assert.ok(accountInfo.lamports == 100000000)
+      mint = await createMint(
+        provider.connection,
+        payer,
+        mintAuthority.publicKey,
+        null,
+        0);
+
+      mintBond = await createMint(
+        provider.connection,
+        payer,
+        bondMintAuthority.publicKey,
+        null,
+        0);
+
+      try {
+        mintService = await createMint(
+          provider.connection,
+          payer,
+          mintServiceAuthority.publicKey,
+          null,
+          0,
+          mintServiceKeypair);
+      } catch {
+        mintService = mintServiceKeypair.publicKey
+      }
+      
+
+      clientTokenAccount = await createAccount(provider.connection, payer, mint, clientAccount.publicKey, null, null, TOKEN_PROGRAM_ID);
+      executorTokenAccount = await createAccount(provider.connection, payer, mint, executorAccount.publicKey, null, null, TOKEN_PROGRAM_ID);
+      checkerTokenAccount = await createAccount(provider.connection, payer, mint, checkerAccount.publicKey, null, null, TOKEN_PROGRAM_ID);
+      serviceFeeTokenAccount = await createAccount(provider.connection, payer, mint, serviceFeeAccount.publicKey, null, null, TOKEN_PROGRAM_ID);
+
+      bondClientTokenAccount = await createAccount(provider.connection, payer, mintBond, clientAccount.publicKey, null, null, TOKEN_PROGRAM_ID);
+      bondExecutorTokenAccount = await createAccount(provider.connection, payer, mintBond, executorAccount.publicKey, null, null, TOKEN_PROGRAM_ID);
+      
+      clientServiceTokenAccount = await createAccount(provider.connection, payer, mintService, clientAccount.publicKey, null, null, TOKEN_PROGRAM_ID);
+      serviceFeeServiceTokenAccount = await createAccount(provider.connection, payer, mintService, serviceFeeAccount.publicKey, null, null, TOKEN_PROGRAM_ID);
+
+      await mintTo(provider.connection, payer, mint, clientTokenAccount, mintAuthority.publicKey, clientTokenBalance, [mintAuthority])
+      await mintTo(provider.connection, payer, mint, executorTokenAccount, mintAuthority.publicKey, otherTokenBalance, [mintAuthority])
+      await mintTo(provider.connection, payer, mint, checkerTokenAccount, mintAuthority.publicKey, otherTokenBalance, [mintAuthority])
+      await mintTo(provider.connection, payer, mint, serviceFeeTokenAccount, mintAuthority.publicKey, serviceFeeTokenBalance, [mintAuthority])
+    })
+
+    it("Validate state", async () => {
+
+      const clientTokenAccountInfo = await getAccount(
+        provider.connection,
+        clientTokenAccount
+      )
+      const executorTokenAccountInfo = await getAccount(
+        provider.connection,
+        executorTokenAccount
+      )
+      const checkerTokenAccountInfo = await getAccount(
+        provider.connection,
+        checkerTokenAccount
+      )
+
+      assert.ok(clientTokenAccountInfo.mint.toBase58() == mint.toBase58())
+      assert.ok(clientTokenAccountInfo.amount.toString() == clientTokenBalance.toString())
+      assert.ok(executorTokenAccountInfo.amount.toString() == otherTokenBalance.toString())
+      assert.ok(checkerTokenAccountInfo.amount.toString() == otherTokenBalance.toString())
+    });
+    
+
+    it("Create deal with holder mode (no CTUS fund)", async () => {
+      try {
+        var data = await createDeal(
+          uuid(),
+          amount,
+          0,
+          0,
+          0,
+          clientAccount,
+          executorAccount,
+          payer,
+          serviceFeeTokenAccount,
+          clientTokenAccount,
+          clientServiceTokenAccount,
+          executorTokenAccount,
+          bondClientTokenAccount,
+          mintBond,
+          bondExecutorTokenAccount,
+          mintBond,
+          mint,
+          mintService,
+          true,
+          new Date().getTime() / 1000)
+    
+          const state = await program.account.dealState.fetch(data.state_account_pda)
+          const serviceFeeTokenAccountInfo = await getAccount(
+            provider.connection,
+            serviceFeeTokenAccount
+          )
+          assert.ok(serviceFeeTokenAccountInfo.amount.toString() == service_fee.toString())
+          assert.ok(state.amount.toNumber().toString() == amount.toString())
+          assert.ok(state.clientKey.toBase58() == clientAccount.publicKey.toBase58())
+          assert.ok(state.executorKey.toBase58() == executorAccount.publicKey.toBase58())
+      } catch(err) {
+        assert.ok(err.error.origin == "client_service_token_account")
+      }
+    })
+
+    it("Create deal with executor bond", async () => {
+
+      await mintTo(provider.connection, payer, mintBond, bondExecutorTokenAccount, bondMintAuthority.publicKey, 100, [bondMintAuthority])
+    
+      let serviceFee = BigInt(100)
+      let executorBond = BigInt(56)
       const serviceFeeTokenAccountInfo = await getAccount(
         provider.connection,
-        serviceFeeServiceTokenAccount
+        serviceFeeTokenAccount
       )
-  
-      assert.ok(serviceFeeTokenAccountInfo.amount.toString() == "0".toString())
-      assert.ok(state.amount.toNumber().toString() == amount.toString())
-      assert.ok(state.clientKey.toBase58() == clientAccount.publicKey.toBase58())
-      assert.ok(state.executorKey.toBase58() == executorAccount.publicKey.toBase58())
-  })
-
-  it("Start deal with ivalid client token account", async () => {
-    let amount = 1000
-    try {
-      await initDealWithParams(
-        "1234",
-        amount,
-        0,
-        0,
-        clientAccount,
-        executorAccount,
-        checkerAccount,
-        payer,
-        serviceFeeTokenAccount,
-        executorTokenAccount,
-        clientServiceTokenAccount,
-        executorTokenAccount,
-        checkerTokenAccount,
-        mintService)
-        assert.ok(false)
-    } catch { assert.ok(true) }
+      var serviceAccountAmount = serviceFeeTokenAccountInfo.amount
+      
+      try {
+        var data = await createDeal(
+          uuid(),
+          amount,
+          0,
+          executorBond,
+          serviceFee,
+          clientAccount,
+          executorAccount,
+          payer,
+          serviceFeeTokenAccount,
+          clientTokenAccount,
+          clientServiceTokenAccount,
+          executorTokenAccount,
+          bondClientTokenAccount,
+          mintBond,
+          bondExecutorTokenAccount,
+          mintBond,
+          mint,
+          mintService,
+          false,
+          new Date().getTime() / 1000)
     
-  })
-  it("Start deal with ivalid zero amount, fee and service fee with custom token", async () => {
+          const state = await program.account.dealState.fetch(data.state_account_pda)
+          const serviceFeeTokenAccountInfo = await getAccount(
+            provider.connection,
+            serviceFeeTokenAccount
+          )
+          const executorBondTokenAccountInfo = await getAccount(
+            provider.connection,
+            data.executor_bond_vault_account_pda
+          )
+          assert.ok(serviceFeeTokenAccountInfo.amount.toString() == (serviceAccountAmount + serviceFee).toString())
+          assert.ok(executorBondTokenAccountInfo.amount.toString() == executorBond.toString())
+          assert.ok(state.amount.toNumber().toString() == amount.toString())
+          assert.ok(state.clientKey.toBase58() == clientAccount.publicKey.toBase58())
+          assert.ok(state.executorKey.toBase58() == executorAccount.publicKey.toBase58())
+      } catch(err) {
+        console.log(err)
+        assert.ok(false)
+      }
+    })
 
-    let amount = 0
+    it("Create deal twice", async () => {
+
+      await mintTo(provider.connection, payer, mintBond, bondExecutorTokenAccount, bondMintAuthority.publicKey, 100, [bondMintAuthority])
     
-    try {
-      await initDealWithParams(
-        "1234333",
-        amount,
-        0,
-        0,
-        clientAccount,
-        executorAccount,
-        checkerAccount,
-        payer,
-        serviceFeeTokenAccount,
-        clientTokenAccount,
-        clientServiceTokenAccount,
-        executorTokenAccount,
-        checkerTokenAccount,
-        mintService)
-        assert.ok(false)
-    } catch(error) {
-      assert.ok(true)
-    }
-  })
+      let serviceFee = BigInt(100)
+      let executorBond = BigInt(56)
+      let dealId = uuid()
+      try {
+        await createDeal(
+          dealId,
+          amount,
+          0,
+          executorBond,
+          serviceFee,
+          clientAccount,
+          executorAccount,
+          payer,
+          serviceFeeTokenAccount,
+          clientTokenAccount,
+          clientServiceTokenAccount,
+          executorTokenAccount,
+          bondClientTokenAccount,
+          mintBond,
+          bondExecutorTokenAccount,
+          mintBond,
+          mint,
+          mintService,
+          false,
+          new Date().getTime() / 1000)
 
-  it("Start deal with ivalid zero service fee with custom token", async () => {
+          assert.ok(true)
+        await createDeal(
+          dealId,
+          amount,
+          0,
+          executorBond,
+          serviceFee,
+          clientAccount,
+          executorAccount,
+          payer,
+          serviceFeeTokenAccount,
+          clientTokenAccount,
+          clientServiceTokenAccount,
+          executorTokenAccount,
+          bondClientTokenAccount,
+          mintBond,
+          bondExecutorTokenAccount,
+          mintBond,
+          mint,
+          mintService,
+          false,
+          new Date().getTime() / 1000)
+          assert.ok(false)
+      } catch(err) {
+        assert.ok(true)
+      }
+    })
 
-    let amount = 1000
-    const clientTokenAccountInfo = await getAccount(
-      provider.connection,
-      clientTokenAccount
-    )
-    try {
-      await initDealWithParams(
-        "123433321312",
-        amount,
-        0,
-        0,
-        clientAccount,
-        executorAccount,
-        checkerAccount,
-        payer,
-        serviceFeeTokenAccount,
-        clientTokenAccount,
-        clientServiceTokenAccount,
-        executorTokenAccount,
-        checkerTokenAccount,
-        mint)
+    it("Create deal with bond and try cancel", async () => {
+      await mintTo(provider.connection, payer, mintBond, bondExecutorTokenAccount, bondMintAuthority.publicKey, 100, [bondMintAuthority])
+    
+      let serviceFee = BigInt(100)
+      let executorBond = BigInt(56)
+
+      var executorTokenAccountInfo = await getAccount(
+        provider.connection,
+        executorTokenAccount
+      )
+
+      try {
+        let data = await createDeal(
+          uuid(),
+          amount,
+          0,
+          executorBond,
+          serviceFee,
+          clientAccount,
+          executorAccount,
+          payer,
+          serviceFeeTokenAccount,
+          clientTokenAccount,
+          clientServiceTokenAccount,
+          executorTokenAccount,
+          bondClientTokenAccount,
+          mintBond,
+          bondExecutorTokenAccount,
+          mintBond,
+          mint,
+          mintService,
+          false,
+          new Date().getTime() / 1000
+        )
+        executorTokenAccountInfo = await getAccount(
+          provider.connection,
+          executorTokenAccount
+        )
+        try {
+          await program.methods
+          .cancel(data.seed)
+          .accounts({
+            initializer: clientAccount.publicKey,
+            depositAccount: data.vault_account_pda,
+            authority: data.vault_authority_pda,
+            clientTokenAccount: clientTokenAccount,
+            dealState: data.state_account_pda,
+            tokenProgram: TOKEN_PROGRAM_ID,
+          })
+          .signers([clientAccount])
+          .rpc()
+        } catch(error) {
+          assert.ok(error.error.errorCode.code == 'NeedCancelWithBond')
+        }
+      } catch(error) { 
+        console.log(error)
         assert.ok(false)
-    } catch(error) {
-      assert.ok(true)
-    }
+      }
+    })
   })
 });
