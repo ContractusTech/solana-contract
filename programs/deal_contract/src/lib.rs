@@ -54,16 +54,17 @@ pub mod deal_contract {
         ctx.accounts.deal_state.deposit_key = *ctx.accounts.deposit_account.to_account_info().key;
         ctx.accounts.deal_state.authority_key = *ctx.accounts.authority.to_account_info().key;
         
+        ctx.accounts.deal_state.holder_mode_deposit_key =  *ctx.accounts.holder_deposit_account.to_account_info().key;
+        
         ctx.accounts.deal_state.client_token_account_key = *ctx.accounts.client_token_account.to_account_info().key;
         ctx.accounts.deal_state.executor_token_account_key = *ctx.accounts.executor_token_account.to_account_info().key;
         ctx.accounts.deal_state.checker_token_account_key = *ctx.accounts.checker_token_account.to_account_info().key;
-        ctx.accounts.deal_state.service_key = Pubkey::from_str(SERVICE_ACCOUNT_ADDRESS).unwrap();
+        // ctx.accounts.deal_state.service_key = Pubkey::from_str(SERVICE_ACCOUNT_ADDRESS).unwrap();
 
         ctx.accounts.deal_state.bump = *ctx.bumps.get("deal_state").unwrap();
         ctx.accounts.deal_state.deposit_bump = *ctx.bumps.get("deposit_account").unwrap();
         ctx.accounts.deal_state.authority_bump = *ctx.bumps.get("authority").unwrap();
         ctx.accounts.deal_state.holder_deposit_bump = *ctx.bumps.get("holder_deposit_account").unwrap();
-        
         
         ctx.accounts.deal_state.with_bond = false;
         ctx.accounts.deal_state.checker_fee = checker_fee;
@@ -140,11 +141,16 @@ pub mod deal_contract {
         ctx.accounts.deal_state.authority_key = *ctx.accounts.authority.to_account_info().key;
         
         ctx.accounts.deal_state.client_token_account_key = *ctx.accounts.client_token_account.to_account_info().key;
-        ctx.accounts.deal_state.executor_token_account_key = *ctx.accounts.executor_token_account.to_account_info().key;
-        ctx.accounts.deal_state.executor_bond_deposit_key = *ctx.accounts.executor_bond_account.to_account_info().key;
+        ctx.accounts.deal_state.client_bond_deposit_key = *ctx.accounts.deposit_client_bond_account.to_account_info().key;
         ctx.accounts.deal_state.client_bond_token_account_key = *ctx.accounts.client_bond_account.to_account_info().key;
 
-        ctx.accounts.deal_state.service_key = Pubkey::from_str(SERVICE_ACCOUNT_ADDRESS).unwrap();
+        ctx.accounts.deal_state.executor_token_account_key = *ctx.accounts.executor_token_account.to_account_info().key;
+        ctx.accounts.deal_state.executor_bond_deposit_key = *ctx.accounts.deposit_executor_bond_account.to_account_info().key;
+        ctx.accounts.deal_state.executor_bond_token_account_key = *ctx.accounts.executor_bond_account.to_account_info().key;
+        
+        ctx.accounts.deal_state.holder_mode_deposit_key =  *ctx.accounts.holder_deposit_account.to_account_info().key;
+        
+        // ctx.accounts.deal_state.service_key = Pubkey::from_str(SERVICE_ACCOUNT_ADDRESS).unwrap();
 
         ctx.accounts.deal_state.bump = *ctx.bumps.get("deal_state").unwrap();
         ctx.accounts.deal_state.deposit_bump = *ctx.bumps.get("deposit_account").unwrap();
@@ -198,7 +204,7 @@ pub mod deal_contract {
 
             token::transfer(
                 ctx.accounts.into_transfer_to_client_bond_account(),
-                service_fee,
+                client_bond_amount,
             )?;
         }
 
@@ -289,6 +295,24 @@ pub mod deal_contract {
             )?;
         } 
 
+        if ctx.accounts.deal_state.client_bond_amount > 0 {
+            token::transfer(
+                ctx.accounts
+                    .into_transfer_to_bond_client_token_account_context()
+                    .with_signer(&[&seeds[..]]),
+                    ctx.accounts.deal_state.client_bond_amount
+            )?;
+        }
+
+        if ctx.accounts.deal_state.executor_bond_amount > 0 {
+            token::transfer(
+                ctx.accounts
+                    .into_transfer_to_bond_executor_token_account_context()
+                    .with_signer(&[&seeds[..]]),
+                    ctx.accounts.deal_state.executor_bond_amount
+            )?;
+        }
+
         token::close_account(
             ctx.accounts
                 .into_close_context()
@@ -361,7 +385,7 @@ pub mod deal_contract {
         if ctx.accounts.deal_state.deadline_ts > 0 {
             let clock = Clock::get()?;
             let current_ts = clock.unix_timestamp;
-            if current_ts > ctx.accounts.deal_state.deadline_ts {
+            if ctx.accounts.deal_state.deadline_ts > current_ts  {
                 return Err(ErrorCode::DeadlineNotCome.into());
             }
         }
@@ -388,16 +412,16 @@ pub mod deal_contract {
                 ctx.accounts
                     .into_transfer_to_bond_client_token_account_context()
                     .with_signer(&[&seeds[..]]),
-                    amount
+                    ctx.accounts.deal_state.client_bond_amount
             )?;
         }
 
         if ctx.accounts.deal_state.executor_bond_amount > 0 {
             token::transfer(
                 ctx.accounts
-                    .into_transfer_to_bond_client_token_account_context()
+                    .into_transfer_to_bond_executor_token_account_context()
                     .with_signer(&[&seeds[..]]),
-                    amount
+                    ctx.accounts.deal_state.executor_bond_amount
             )?;
         }
 
@@ -408,6 +432,14 @@ pub mod deal_contract {
         )?;
 
         Ok(())
+    }
+
+    pub fn update_checker(
+        ctx: Context<UpdateChecker>,
+        id: Vec<u8>
+    ) -> Result<()> {
+        // TODO: - 
+        return Err(ErrorCode::NotImplemented.into());
     }
 }
 
@@ -633,15 +665,12 @@ pub struct Cancel<'info> {
     pub initializer: AccountInfo<'info>,
     /// CHECK: This is not dangerous because we don't read or write from this account
     #[account(
-        seeds = [&id, b"auth".as_ref(), deal_state.client_key.as_ref(), deal_state.executor_key.as_ref()],
-        bump = deal_state.authority_bump,
+        constraint = *authority.to_account_info().key == deal_state.authority_key
     )]
     pub authority: AccountInfo<'info>,
     /// CHECK: This is not dangerous because we don't read or write from this account
     #[account(
         mut,
-        seeds = [&id, b"deposit".as_ref(), deal_state.client_key.as_ref(), deal_state.executor_key.as_ref()],
-        bump = deal_state.deposit_bump,
         constraint = deal_state.deposit_key == *deposit_account.to_account_info().key
     )]
     pub deposit_account: Account<'info, TokenAccount>,
@@ -655,7 +684,7 @@ pub struct Cancel<'info> {
         mut,
         seeds = [&id, b"state".as_ref(), deal_state.client_key.as_ref(), deal_state.executor_key.as_ref()],
         bump = deal_state.bump,
-        constraint = (*initializer.to_account_info().key == deal_state.client_key || *initializer.to_account_info().key == deal_state.executor_key || *initializer.to_account_info().key == deal_state.checker_key || *initializer.to_account_info().key == deal_state.service_key),
+        constraint = (*initializer.to_account_info().key == deal_state.client_key || *initializer.to_account_info().key == deal_state.executor_key || *initializer.to_account_info().key == deal_state.checker_key || *initializer.to_account_info().key == Pubkey::from_str(SERVICE_ACCOUNT_ADDRESS).unwrap()),
         close = initializer
     )]
     pub deal_state: Box<Account<'info, DealState>>,
@@ -671,17 +700,13 @@ pub struct CancelWithBond<'info> {
     pub initializer: AccountInfo<'info>,
     /// CHECK: This is not dangerous because we don't read or write from this account
     #[account(
-        seeds = [&id, b"auth".as_ref(), deal_state.client_key.as_ref(), deal_state.executor_key.as_ref()],
-        bump = deal_state.authority_bump,
+        constraint = *authority.to_account_info().key == deal_state.authority_key
     )]
     pub authority: AccountInfo<'info>,
     /// CHECK: This is not dangerous because we don't read or write from this account
     #[account(
         mut,
-        constraint = deal_state.deposit_key == *deposit_account.to_account_info().key,
-        seeds = [&id, b"deposit".as_ref(), deal_state.client_key.as_ref(), deal_state.executor_key.as_ref()],
-        bump = deal_state.deposit_bump,
-        
+        constraint = *deposit_account.to_account_info().key == deal_state.deposit_key
     )]
     pub deposit_account: Account<'info, TokenAccount>,
     /// CHECK: This is not dangerous because we don't read or write from this account
@@ -692,31 +717,29 @@ pub struct CancelWithBond<'info> {
     pub client_token_account: Account<'info, TokenAccount>,
     #[account(
         mut,
-        constraint = client_bond_account.owner.key() == deal_state.client_key
+        constraint = *client_bond_account.to_account_info().key == deal_state.client_bond_token_account_key
     )]
     pub client_bond_account: Box<Account<'info, TokenAccount>>,
     #[account(
         mut,
-        constraint = executor_bond_account.owner.key() == deal_state.executor_key
+        constraint = *executor_bond_account.to_account_info().key == deal_state.executor_bond_token_account_key
     )]
     pub executor_bond_account: Box<Account<'info, TokenAccount>>,
     #[account(
         mut,
-        seeds = [&id, b"deposit_bond_client".as_ref(),  deal_state.client_key.as_ref(), deal_state.executor_key.as_ref()],
-        bump = deal_state.client_bond_deposit_bump
+        constraint = *deposit_client_bond_account.to_account_info().key == deal_state.client_bond_deposit_key
     )]
     pub deposit_client_bond_account: Box<Account<'info, TokenAccount>>,
     #[account(
         mut,
-        seeds = [&id, b"deposit_bond_executor".as_ref(),  deal_state.client_key.as_ref(), deal_state.executor_key.as_ref()],
-        bump = deal_state.executor_bond_deposit_bump,
+        constraint = *deposit_executor_bond_account.to_account_info().key == deal_state.executor_bond_deposit_key
     )]
     pub deposit_executor_bond_account: Box<Account<'info, TokenAccount>>,
     #[account(
         mut,
         seeds = [&id, b"state".as_ref(), deal_state.client_key.as_ref(), deal_state.executor_key.as_ref()],
         bump = deal_state.bump,
-        constraint = (*initializer.to_account_info().key == deal_state.client_key || *initializer.to_account_info().key == deal_state.executor_key || *initializer.to_account_info().key == deal_state.checker_key || *initializer.to_account_info().key == deal_state.service_key),
+        constraint = (*initializer.to_account_info().key == deal_state.client_key || *initializer.to_account_info().key == deal_state.executor_key || *initializer.to_account_info().key == deal_state.checker_key || *initializer.to_account_info().key == Pubkey::from_str(SERVICE_ACCOUNT_ADDRESS).unwrap()),
         close = initializer
     )]
     pub deal_state: Box<Account<'info, DealState>>,
@@ -734,20 +757,18 @@ pub struct Finish<'info> {
     pub initializer: AccountInfo<'info>,
     /// CHECK: This is not dangerous because we don't read or write from this account
     #[account(
-        seeds = [&id, b"auth".as_ref(), deal_state.client_key.as_ref(), deal_state.executor_key.as_ref()],
-        bump = deal_state.authority_bump,
+        constraint = *authority.to_account_info().key == deal_state.authority_key
     )]
     pub authority: AccountInfo<'info>,
     #[account(
         mut,
         constraint = deal_state.deposit_key == *deposit_account.to_account_info().key,
-        seeds = [&id, b"deposit".as_ref(), deal_state.client_key.as_ref(), deal_state.executor_key.as_ref()],
-        bump = deal_state.deposit_bump
     )]
     pub deposit_account: Account<'info, TokenAccount>,
+    /// CHECK: This is not dangerous because we don't read or write from this account
     #[account(
-        seeds = [&id, b"holder_deposit".as_ref(), deal_state.client_key.as_ref(), deal_state.executor_key.as_ref()],
-        bump = deal_state.holder_deposit_bump,
+        constraint = deal_state.holder_mode_deposit_key == *holder_deposit_account.to_account_info().key,
+        mut,
     )]
     pub holder_deposit_account: Box<Account<'info, TokenAccount>>,
     #[account(
@@ -787,20 +808,16 @@ pub struct FinishWithBond<'info> {
     pub initializer: AccountInfo<'info>,
     /// CHECK: This is not dangerous because we don't read or write from this account
     #[account(
-        seeds = [&id, b"auth".as_ref(), deal_state.client_key.as_ref(), deal_state.executor_key.as_ref()],
-        bump = deal_state.authority_bump,
+        constraint = *authority.to_account_info().key == deal_state.authority_key
     )]
     pub authority: AccountInfo<'info>,
     #[account(
         mut,
-        constraint = deal_state.deposit_key == *deposit_account.to_account_info().key,
-        seeds = [&id, b"deposit".as_ref(), deal_state.client_key.as_ref(), deal_state.executor_key.as_ref()],
-        bump = deal_state.deposit_bump
+        constraint = deal_state.deposit_key == *deposit_account.to_account_info().key
     )]
     pub deposit_account: Account<'info, TokenAccount>,
     #[account(
-        seeds = [&id, b"holder_deposit".as_ref(), deal_state.client_key.as_ref(), deal_state.executor_key.as_ref()],
-        bump = deal_state.holder_deposit_bump,
+        constraint = deal_state.holder_mode_deposit_key == *holder_deposit_account.to_account_info().key
     )]
     pub holder_deposit_account: Box<Account<'info, TokenAccount>>,
     #[account(
@@ -816,24 +833,22 @@ pub struct FinishWithBond<'info> {
     pub checker_token_account: Account<'info, TokenAccount>,
     #[account(
         mut,
-        constraint = client_bond_account.owner.key() == deal_state.client_key
+        constraint = client_bond_account.owner.key() == deal_state.client_bond_token_account_key
     )]
     pub client_bond_account: Box<Account<'info, TokenAccount>>,
     #[account(
         mut,
-        constraint = executor_bond_account.owner.key() == deal_state.executor_key
+        constraint = executor_bond_account.owner.key() == deal_state.executor_bond_token_account_key
     )]
     pub executor_bond_account: Box<Account<'info, TokenAccount>>,
     #[account(
         mut,
-        seeds = [&id, b"deposit_bond_client".as_ref(),  deal_state.client_key.as_ref(), deal_state.executor_key.as_ref()],
-        bump = deal_state.client_bond_deposit_bump
+        constraint = *deposit_client_bond_account.to_account_info().key == deal_state.client_bond_deposit_key
     )]
     pub deposit_client_bond_account: Box<Account<'info, TokenAccount>>,
     #[account(
         mut,
-        seeds = [&id, b"deposit_bond_executor".as_ref(),  deal_state.client_key.as_ref(), deal_state.executor_key.as_ref()],
-        bump = deal_state.executor_bond_deposit_bump,
+        constraint = *deposit_client_bond_account.to_account_info().key == deal_state.executor_bond_deposit_key
     )]
     pub deposit_executor_bond_account: Box<Account<'info, TokenAccount>>,
     #[account(
@@ -845,6 +860,33 @@ pub struct FinishWithBond<'info> {
         constraint = *executor_token_account.to_account_info().key == deal_state.executor_token_account_key,
         constraint = *checker_token_account.to_account_info().key == deal_state.checker_token_account_key,
         close = initializer
+    )]
+    pub deal_state: Box<Account<'info, DealState>>,
+    /// CHECK: This is not dangerous because we don't read or write from this account
+    pub token_program: AccountInfo<'info>
+}
+
+#[derive(Accounts)]
+#[instruction(id: Vec<u8>)]
+pub struct UpdateChecker<'info> { 
+    /// CHECK: This is not dangerous because we don't read or write from this account
+    #[account(
+        mut, 
+        signer,
+        constraint = Pubkey::from_str(SERVICE_ACCOUNT_ADDRESS).unwrap() == *initializer.to_account_info().key,
+    )]
+    pub initializer: AccountInfo<'info>,
+    /// CHECK: This is not dangerous because we don't read or write from this account
+    #[account( mut)]
+    pub client: AccountInfo<'info>,
+    /// CHECK: This is not dangerous because we don't read or write from this account
+    #[account(mut)]
+    pub executor: AccountInfo<'info>,
+   
+    #[account(
+        mut,
+        seeds = [&id, b"state".as_ref(), deal_state.client_key.as_ref(), deal_state.executor_key.as_ref()],
+        bump = deal_state.bump
     )]
     pub deal_state: Box<Account<'info, DealState>>,
     /// CHECK: This is not dangerous because we don't read or write from this account
@@ -872,7 +914,7 @@ pub struct DealState {
     pub holder_mode_deposit_key: Pubkey,
 
     pub authority_key: Pubkey,
-    pub service_key: Pubkey,
+    // pub service_key: Pubkey,
 
     pub amount: u64,
     pub client_bond_amount: u64,
@@ -1209,4 +1251,6 @@ pub enum ErrorCode {
     NeedCancelWithBond,
     #[msg("The deal need cancel without bond")]
     NeedCancelWithoutBond,
+    #[msg("Not implemented method")]
+    NotImplemented,
 }

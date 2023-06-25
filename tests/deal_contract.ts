@@ -7,7 +7,7 @@ import { assert } from "chai";
 import { v4 as uuid } from 'uuid'
 import * as fs from 'fs';
 
-describe("🤖 Test Contractus smart-contract", () => {
+describe("🤖 Tests Contractus smart-contract", () => {
   const commitment: Commitment = 'processed';
   const options = AnchorProvider.defaultOptions();
   const program = anchor.workspace.DealContract as Program<DealContract>;
@@ -307,7 +307,8 @@ describe("🤖 Test Contractus smart-contract", () => {
         clientTokenAccount
       )
 
-      await program.methods
+      try {
+        await program.methods
         .finish(data.seed)
         .accounts({
           initializer: checkerAccount.publicKey,
@@ -321,6 +322,11 @@ describe("🤖 Test Contractus smart-contract", () => {
         })
         .signers([checkerAccount])
         .rpc()
+      } catch(error) {
+        console.log(error)
+        assert.ok(false)
+      }
+      
   
       const clientTokenAccountInfo = await getAccount(
         provider.connection,
@@ -678,7 +684,6 @@ describe("🤖 Test Contractus smart-contract", () => {
       }
     }
 
-  
     before(async () => {
       await provider.connection.confirmTransaction(
         await provider.connection.requestAirdrop(payer.publicKey, 2000000000),
@@ -765,7 +770,6 @@ describe("🤖 Test Contractus smart-contract", () => {
       assert.ok(checkerTokenAccountInfo.amount.toString() == otherTokenBalance.toString())
     });
     
-
     it("Create deal with holder mode (no CTUS fund)", async () => {
       try {
         var data = await createDeal(
@@ -859,7 +863,7 @@ describe("🤖 Test Contractus smart-contract", () => {
       }
     })
 
-    it("Create deal twice", async () => {
+    it("Try create deal twice", async () => {
 
       await mintTo(provider.connection, payer, mintBond, bondExecutorTokenAccount, bondMintAuthority.publicKey, 100, [bondMintAuthority])
     
@@ -913,7 +917,7 @@ describe("🤖 Test Contractus smart-contract", () => {
           new Date().getTime() / 1000)
           assert.ok(false)
       } catch(err) {
-        assert.ok(true)
+        assert.ok(err.error.origin == "deposit_account")
       }
     })
 
@@ -949,7 +953,7 @@ describe("🤖 Test Contractus smart-contract", () => {
           mint,
           mintService,
           false,
-          new Date().getTime() / 1000
+          (new Date().getTime() / 1000) + 1000
         )
         executorTokenAccountInfo = await getAccount(
           provider.connection,
@@ -971,8 +975,161 @@ describe("🤖 Test Contractus smart-contract", () => {
         } catch(error) {
           assert.ok(error.error.errorCode.code == 'NeedCancelWithBond')
         }
+        try {
+          await program.methods
+          .cancelWithBond(data.seed)
+          .accounts({
+            clientBondAccount: bondClientTokenAccount,
+            executorBondAccount: bondExecutorTokenAccount,
+            depositClientBondAccount: data.client_bond_vault_account_pda,
+            depositExecutorBondAccount: data.executor_bond_vault_account_pda,
+            initializer: clientAccount.publicKey,
+            depositAccount: data.vault_account_pda,
+            authority: data.vault_authority_pda,
+            clientTokenAccount: clientTokenAccount,
+            dealState: data.state_account_pda,
+            tokenProgram: TOKEN_PROGRAM_ID,
+          })
+          .signers([clientAccount])
+          .rpc()
+        } catch(error) {
+          assert.ok(error.error.errorCode.code == 'DeadlineNotCome')
+        }
       } catch(error) { 
         console.log(error)
+        assert.ok(false)
+      }
+    })
+
+    it("Create deal with bond and finish", async () => {
+      await mintTo(provider.connection, payer, mintBond, bondClientTokenAccount, bondMintAuthority.publicKey, 100, [bondMintAuthority])
+      await mintTo(provider.connection, payer, mintBond, bondExecutorTokenAccount, bondMintAuthority.publicKey, 100, [bondMintAuthority])
+
+      var bondClientTokenAccountInfo = await getAccount(
+        provider.connection,
+        bondClientTokenAccount
+      )
+      var bondClientTokenAmountBefore = bondClientTokenAccountInfo.amount
+
+      var bondExecutorTokenAccountInfo = await getAccount(
+        provider.connection,
+        bondExecutorTokenAccount
+      )
+      var bondExecutorTokenAmountBefore = bondExecutorTokenAccountInfo.amount
+
+      var clientTokenAccountInfo = await getAccount(
+        provider.connection,
+        clientTokenAccount
+      )
+      var clientTokenAmountBefore = clientTokenAccountInfo.amount
+      
+      let amount = BigInt(100)
+      let serviceFee = BigInt(100)
+      let executorBond = BigInt(56)
+      let clientBond = BigInt(40)
+      let data
+      let deadline = new Date().getTime() / 1000
+      try {
+        data = await createDeal(
+          uuid(),
+          amount,
+          clientBond,
+          executorBond,
+          serviceFee,
+          clientAccount,
+          executorAccount,
+          payer,
+          serviceFeeTokenAccount,
+          clientTokenAccount,
+          clientServiceTokenAccount,
+          executorTokenAccount,
+          bondClientTokenAccount,
+          mintBond,
+          bondExecutorTokenAccount,
+          mintBond,
+          mint,
+          mintService,
+          false,
+          deadline
+        )
+        
+        bondClientTokenAccountInfo = await getAccount(
+          provider.connection,
+          bondClientTokenAccount
+        )
+        var bondClientTokenAmountAfter = bondClientTokenAccountInfo.amount
+  
+        bondExecutorTokenAccountInfo = await getAccount(
+          provider.connection,
+          bondExecutorTokenAccount
+        )
+        var bondExecutorTokenAmountAfter = bondExecutorTokenAccountInfo.amount
+        
+       let depositBondExecutorTokenAccountInfo = await getAccount(
+          provider.connection,
+          data.executor_bond_vault_account_pda
+        )
+
+        let depositBondClientTokenAccountInfo = await getAccount(
+          provider.connection,
+          data.client_bond_vault_account_pda
+        )
+
+        clientTokenAccountInfo = await getAccount(
+          provider.connection,
+          clientTokenAccount
+        )
+        var clientTokenAmountAfter = clientTokenAccountInfo.amount
+
+        assert.ok(bondExecutorTokenAmountAfter < bondExecutorTokenAmountBefore)
+        assert.ok(clientTokenAmountAfter < clientTokenAmountBefore)
+        assert.ok(bondClientTokenAmountAfter < bondClientTokenAmountBefore)
+        assert.ok(depositBondExecutorTokenAccountInfo.amount == executorBond)
+        assert.ok(depositBondClientTokenAccountInfo.amount == clientBond)
+
+        let before_deadline = new Date().getTime() / 1000
+        assert.ok(before_deadline > deadline)
+
+        await program.methods
+          .cancelWithBond(data.seed)
+          .accounts({
+            clientBondAccount: bondClientTokenAccount,
+            executorBondAccount: bondExecutorTokenAccount,
+            depositClientBondAccount: data.client_bond_vault_account_pda,
+            depositExecutorBondAccount: data.executor_bond_vault_account_pda,
+            initializer: clientAccount.publicKey,
+            depositAccount: data.vault_account_pda,
+            authority: data.vault_authority_pda,
+            clientTokenAccount: clientTokenAccount,
+            dealState: data.state_account_pda,
+            tokenProgram: TOKEN_PROGRAM_ID,
+          })
+          .signers([clientAccount])
+          .rpc()
+
+          bondClientTokenAccountInfo = await getAccount(
+            provider.connection,
+            bondClientTokenAccount
+          )
+          var bondClientTokenAmountAfterCancel = bondClientTokenAccountInfo.amount
+    
+          bondExecutorTokenAccountInfo = await getAccount(
+            provider.connection,
+            bondExecutorTokenAccount
+          )
+          var bondExecutorTokenAmountAfterCancel = bondExecutorTokenAccountInfo.amount
+
+          clientTokenAccountInfo = await getAccount(
+            provider.connection,
+            clientTokenAccount
+          )
+          var clientTokenAmountAfterCancel = clientTokenAccountInfo.amount
+
+          assert.ok(bondClientTokenAmountAfterCancel == bondClientTokenAmountBefore)
+          assert.ok(bondExecutorTokenAmountAfterCancel == bondExecutorTokenAmountBefore)
+          assert.ok(clientTokenAmountAfterCancel == clientTokenAmountBefore - serviceFee)
+
+      } catch(error) { 
         assert.ok(false)
       }
     })
