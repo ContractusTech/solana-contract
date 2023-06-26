@@ -4,9 +4,20 @@ use spl_token::instruction::AuthorityType;
 use std::convert::Into;
 use std::str::FromStr;
 
-static SERVICE_TOKEN_ADDRESS_MINT: &'static str = "67sJHNFLxkREsdu35n8tmfudv1ZU59XhBYjc6rivMt2V"; // NEED CHECK: CTUS address
-static SERVICE_ACCOUNT_ADDRESS: &'static str = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"; // NEED CHECK: Admin level
-static HOLDER_MODE_AMOUNT: u64 = 10000000000000; // NEED CHECK: 10_000 CTUS
+// NEED CHECK: CTUS address
+// Devnet: CyhjLfsfDz7rtszqBGaHiFrBbck2LNKEXQkywqNrGVyw
+// Mainnet: ---
+// Localnet: 67sJHNFLxkREsdu35n8tmfudv1ZU59XhBYjc6rivMt2V
+static SERVICE_TOKEN_ADDRESS_MINT: &'static str = "67sJHNFLxkREsdu35n8tmfudv1ZU59XhBYjc6rivMt2V";
+
+// NEED CHECK: Admin level
+// Devnet: 3aDaxu2XwsGmj7amUnrxaHoKTtKJUqebkYP9HJTkP434
+// Mainnet: ---
+// Localnet: TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA
+static SERVICE_ACCOUNT_ADDRESS: &'static str = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"; 
+
+// NEED CHECK: 10_000 CTUS
+static HOLDER_MODE_AMOUNT: u64 = 10000000000000; 
 
 declare_id!("9kpWdyR2qtNT21MhLRTBbT21v5thz9hhB3zaPUhr6tbE");
 
@@ -15,18 +26,17 @@ pub mod deal_contract {
     use super::*;
 
     const AUTHORITY_SEED: &[u8] = b"auth";
-    const DEPOSIT_SEED: &[u8] = b"deposit";
     
     pub fn initialize_with_checker(
-        ctx: Context<Initialize>,
-        id: Vec<u8>,
+        _ctx: Context<Initialize>,
+        _id: Vec<u8>,
         amount: u64,
         service_fee: u64,
         checker_fee: u64,
         holder_mode: bool
     ) -> Result<()> {
 
-        if ctx.accounts.deal_state.is_started {
+        if _ctx.accounts.deal_state.is_started {
             return Err(ErrorCode::AlreadyStarted.into());
         }
 
@@ -37,64 +47,64 @@ pub mod deal_contract {
         let service_token_mint: Pubkey = Pubkey::from_str(SERVICE_TOKEN_ADDRESS_MINT).unwrap();
 
         if holder_mode
-        && ctx.accounts.client_service_token_account.amount < HOLDER_MODE_AMOUNT 
-        && ctx.accounts.client_service_token_account.mint != service_token_mint 
-        && ctx.accounts.client_token_account.mint != service_token_mint {
+        && _ctx.accounts.client_service_token_account.amount < HOLDER_MODE_AMOUNT 
+        && _ctx.accounts.client_service_token_account.mint != service_token_mint 
+        && _ctx.accounts.client_token_account.mint != service_token_mint {
             return Err(ErrorCode::HolderModeUnavailable.into());
         }
         if !holder_mode && service_fee == 0 {
             return Err(ErrorCode::FeeIsTooLow.into());
         }
 
-        ctx.accounts.deal_state.is_started = true;
+        _ctx.accounts.deal_state.is_started = true;
 
-        ctx.accounts.deal_state.client_key = *ctx.accounts.client.key;
-        ctx.accounts.deal_state.executor_key = *ctx.accounts.executor.to_account_info().key;
-        ctx.accounts.deal_state.checker_key = *ctx.accounts.checker.to_account_info().key;
-        ctx.accounts.deal_state.deposit_key = *ctx.accounts.deposit_account.to_account_info().key;
-        ctx.accounts.deal_state.authority_key = *ctx.accounts.authority.to_account_info().key;
+        _ctx.accounts.deal_state.client_key = *_ctx.accounts.client.key;
+        _ctx.accounts.deal_state.executor_key = *_ctx.accounts.executor.to_account_info().key;
+        _ctx.accounts.deal_state.checker_key = *_ctx.accounts.checker.to_account_info().key;
+        _ctx.accounts.deal_state.deposit_key = *_ctx.accounts.deposit_account.to_account_info().key;
+        _ctx.accounts.deal_state.authority_key = *_ctx.accounts.authority.to_account_info().key;
         
-        ctx.accounts.deal_state.holder_mode_deposit_key =  *ctx.accounts.holder_deposit_account.to_account_info().key;
+        _ctx.accounts.deal_state.holder_mode_deposit_key =  *_ctx.accounts.holder_deposit_account.to_account_info().key;
         
-        ctx.accounts.deal_state.client_token_account_key = *ctx.accounts.client_token_account.to_account_info().key;
-        ctx.accounts.deal_state.executor_token_account_key = *ctx.accounts.executor_token_account.to_account_info().key;
-        ctx.accounts.deal_state.checker_token_account_key = *ctx.accounts.checker_token_account.to_account_info().key;
+        _ctx.accounts.deal_state.client_token_account_key = *_ctx.accounts.client_token_account.to_account_info().key;
+        _ctx.accounts.deal_state.executor_token_account_key = *_ctx.accounts.executor_token_account.to_account_info().key;
+        _ctx.accounts.deal_state.checker_token_account_key = *_ctx.accounts.checker_token_account.to_account_info().key;
         // ctx.accounts.deal_state.service_key = Pubkey::from_str(SERVICE_ACCOUNT_ADDRESS).unwrap();
 
-        ctx.accounts.deal_state.bump = *ctx.bumps.get("deal_state").unwrap();
-        ctx.accounts.deal_state.deposit_bump = *ctx.bumps.get("deposit_account").unwrap();
-        ctx.accounts.deal_state.authority_bump = *ctx.bumps.get("authority").unwrap();
-        ctx.accounts.deal_state.holder_deposit_bump = *ctx.bumps.get("holder_deposit_account").unwrap();
+        _ctx.accounts.deal_state.bump = *_ctx.bumps.get("deal_state").unwrap();
+        _ctx.accounts.deal_state.deposit_bump = *_ctx.bumps.get("deposit_account").unwrap();
+        _ctx.accounts.deal_state.authority_bump = *_ctx.bumps.get("authority").unwrap();
+        _ctx.accounts.deal_state.holder_deposit_bump = *_ctx.bumps.get("holder_deposit_account").unwrap();
         
-        ctx.accounts.deal_state.with_bond = false;
-        ctx.accounts.deal_state.checker_fee = checker_fee;
-        ctx.accounts.deal_state.amount = amount;
+        _ctx.accounts.deal_state.with_bond = false;
+        _ctx.accounts.deal_state.checker_fee = checker_fee;
+        _ctx.accounts.deal_state.amount = amount;
 
         token::set_authority(
-            ctx.accounts.into_set_authority_context(),
+            _ctx.accounts.into_set_authority_context(),
             AuthorityType::AccountOwner,
-            Some(*ctx.accounts.authority.to_account_info().key),
+            Some(*_ctx.accounts.authority.to_account_info().key),
         )?;
 
         token::set_authority(
-            ctx.accounts.into_set_authority_holder_context(),
+            _ctx.accounts.into_set_authority_holder_context(),
             AuthorityType::AccountOwner,
-            Some(*ctx.accounts.authority.to_account_info().key),
+            Some(*_ctx.accounts.authority.to_account_info().key),
         )?;
 
         token::transfer(
-            ctx.accounts.into_transfer_to_pda_context(),
+            _ctx.accounts.into_transfer_to_pda_context(),
             amount + checker_fee,
         )?;
 
         if holder_mode {
             token::transfer(
-                ctx.accounts.into_transfer_to_holder_mode_account(),
+                _ctx.accounts.into_transfer_to_holder_mode_account(),
                 HOLDER_MODE_AMOUNT,
             )?;
         } else if service_fee > 0 {
             token::transfer(
-                ctx.accounts.into_transfer_to_service_account(),
+                _ctx.accounts.into_transfer_to_service_account(),
                 service_fee,
             )?;
         }
@@ -103,8 +113,8 @@ pub mod deal_contract {
     }
 
     pub fn initialize_with_bond(
-        ctx: Context<InitializeBond>,
-        id: Vec<u8>,
+        _ctx: Context<InitializeBond>,
+        _id: Vec<u8>,
         amount: u64,
         client_bond_amount: u64,
         executor_bond_amount: u64,
@@ -113,8 +123,14 @@ pub mod deal_contract {
         holder_mode: bool
     ) -> Result<()> {
 
-        if ctx.accounts.deal_state.is_started {
+        if _ctx.accounts.deal_state.is_started {
             return Err(ErrorCode::AlreadyStarted.into());
+        }
+
+        let clock = Clock::get()?;
+        let current_ts = clock.unix_timestamp;
+        if deadline_ts < current_ts {
+            return Err(ErrorCode::DeadlineExpired.into());
         }
 
         if amount == 0 {
@@ -124,99 +140,99 @@ pub mod deal_contract {
         let service_token_mint: Pubkey = Pubkey::from_str(SERVICE_TOKEN_ADDRESS_MINT).unwrap();
 
         if holder_mode
-        && ctx.accounts.client_service_token_account.amount < HOLDER_MODE_AMOUNT 
-        && ctx.accounts.client_service_token_account.mint != service_token_mint 
-        && ctx.accounts.client_token_account.mint != service_token_mint {
+        && _ctx.accounts.client_service_token_account.amount < HOLDER_MODE_AMOUNT 
+        && _ctx.accounts.client_service_token_account.mint != service_token_mint 
+        && _ctx.accounts.client_token_account.mint != service_token_mint {
             return Err(ErrorCode::HolderModeUnavailable.into());
         }
         if !holder_mode && service_fee == 0 {
             return Err(ErrorCode::FeeIsTooLow.into());
         }
 
-        ctx.accounts.deal_state.is_started = true;
+        _ctx.accounts.deal_state.is_started = true;
 
-        ctx.accounts.deal_state.client_key = *ctx.accounts.client.key;
-        ctx.accounts.deal_state.executor_key = *ctx.accounts.executor.to_account_info().key;
-        ctx.accounts.deal_state.deposit_key = *ctx.accounts.deposit_account.to_account_info().key;
-        ctx.accounts.deal_state.authority_key = *ctx.accounts.authority.to_account_info().key;
+        _ctx.accounts.deal_state.client_key = *_ctx.accounts.client.key;
+        _ctx.accounts.deal_state.executor_key = *_ctx.accounts.executor.to_account_info().key;
+        _ctx.accounts.deal_state.deposit_key = *_ctx.accounts.deposit_account.to_account_info().key;
+        _ctx.accounts.deal_state.authority_key = *_ctx.accounts.authority.to_account_info().key;
         
-        ctx.accounts.deal_state.client_token_account_key = *ctx.accounts.client_token_account.to_account_info().key;
-        ctx.accounts.deal_state.client_bond_deposit_key = *ctx.accounts.deposit_client_bond_account.to_account_info().key;
-        ctx.accounts.deal_state.client_bond_token_account_key = *ctx.accounts.client_bond_account.to_account_info().key;
+        _ctx.accounts.deal_state.client_token_account_key = *_ctx.accounts.client_token_account.to_account_info().key;
+        _ctx.accounts.deal_state.client_bond_deposit_key = *_ctx.accounts.deposit_client_bond_account.to_account_info().key;
+        _ctx.accounts.deal_state.client_bond_token_account_key = *_ctx.accounts.client_bond_account.to_account_info().key;
 
-        ctx.accounts.deal_state.executor_token_account_key = *ctx.accounts.executor_token_account.to_account_info().key;
-        ctx.accounts.deal_state.executor_bond_deposit_key = *ctx.accounts.deposit_executor_bond_account.to_account_info().key;
-        ctx.accounts.deal_state.executor_bond_token_account_key = *ctx.accounts.executor_bond_account.to_account_info().key;
+        _ctx.accounts.deal_state.executor_token_account_key = *_ctx.accounts.executor_token_account.to_account_info().key;
+        _ctx.accounts.deal_state.executor_bond_deposit_key = *_ctx.accounts.deposit_executor_bond_account.to_account_info().key;
+        _ctx.accounts.deal_state.executor_bond_token_account_key = *_ctx.accounts.executor_bond_account.to_account_info().key;
         
-        ctx.accounts.deal_state.holder_mode_deposit_key =  *ctx.accounts.holder_deposit_account.to_account_info().key;
+        _ctx.accounts.deal_state.holder_mode_deposit_key =  *_ctx.accounts.holder_deposit_account.to_account_info().key;
         
         // ctx.accounts.deal_state.service_key = Pubkey::from_str(SERVICE_ACCOUNT_ADDRESS).unwrap();
 
-        ctx.accounts.deal_state.bump = *ctx.bumps.get("deal_state").unwrap();
-        ctx.accounts.deal_state.deposit_bump = *ctx.bumps.get("deposit_account").unwrap();
-        ctx.accounts.deal_state.authority_bump = *ctx.bumps.get("authority").unwrap();
-        ctx.accounts.deal_state.holder_deposit_bump = *ctx.bumps.get("holder_deposit_account").unwrap();
-        ctx.accounts.deal_state.client_bond_deposit_bump = *ctx.bumps.get("deposit_client_bond_account").unwrap();
-        ctx.accounts.deal_state.executor_bond_deposit_bump = *ctx.bumps.get("deposit_executor_bond_account").unwrap();
+        _ctx.accounts.deal_state.bump = *_ctx.bumps.get("deal_state").unwrap();
+        _ctx.accounts.deal_state.deposit_bump = *_ctx.bumps.get("deposit_account").unwrap();
+        _ctx.accounts.deal_state.authority_bump = *_ctx.bumps.get("authority").unwrap();
+        _ctx.accounts.deal_state.holder_deposit_bump = *_ctx.bumps.get("holder_deposit_account").unwrap();
+        _ctx.accounts.deal_state.client_bond_deposit_bump = *_ctx.bumps.get("deposit_client_bond_account").unwrap();
+        _ctx.accounts.deal_state.executor_bond_deposit_bump = *_ctx.bumps.get("deposit_executor_bond_account").unwrap();
 
-        ctx.accounts.deal_state.amount = amount;
-        ctx.accounts.deal_state.client_bond_amount = client_bond_amount;
-        ctx.accounts.deal_state.executor_bond_amount = executor_bond_amount;
+        _ctx.accounts.deal_state.amount = amount;
+        _ctx.accounts.deal_state.client_bond_amount = client_bond_amount;
+        _ctx.accounts.deal_state.executor_bond_amount = executor_bond_amount;
 
-        ctx.accounts.deal_state.with_bond = true;
-        ctx.accounts.deal_state.deadline_ts = deadline_ts;
+        _ctx.accounts.deal_state.with_bond = true;
+        _ctx.accounts.deal_state.deadline_ts = deadline_ts;
         
         token::set_authority(
-            ctx.accounts.into_set_authority_context(),
+            _ctx.accounts.into_set_authority_context(),
             AuthorityType::AccountOwner,
-            Some(*ctx.accounts.authority.to_account_info().key),
+            Some(*_ctx.accounts.authority.to_account_info().key),
         )?;
 
         token::set_authority(
-            ctx.accounts.into_set_authority_holder_context(),
+            _ctx.accounts.into_set_authority_holder_context(),
             AuthorityType::AccountOwner,
-            Some(*ctx.accounts.authority.to_account_info().key),
+            Some(*_ctx.accounts.authority.to_account_info().key),
         )?;
 
         token::transfer(
-            ctx.accounts.into_transfer_to_pda_context(),
+            _ctx.accounts.into_transfer_to_pda_context(),
             amount,
         )?;
 
         if holder_mode {
             token::transfer(
-                ctx.accounts.into_transfer_to_holder_mode_account(),
+                _ctx.accounts.into_transfer_to_holder_mode_account(),
                 HOLDER_MODE_AMOUNT,
             )?;
         } else if service_fee > 0 {
             token::transfer(
-                ctx.accounts.into_transfer_to_service_account(),
+                _ctx.accounts.into_transfer_to_service_account(),
                 service_fee,
             )?;
         }
 
         if client_bond_amount > 0 {
             token::set_authority(
-                ctx.accounts.into_set_authority_client_bond_context(),
+                _ctx.accounts.into_set_authority_client_bond_context(),
                 AuthorityType::AccountOwner,
-                Some(*ctx.accounts.authority.to_account_info().key),
+                Some(*_ctx.accounts.authority.to_account_info().key),
             )?;
 
             token::transfer(
-                ctx.accounts.into_transfer_to_client_bond_account(),
+                _ctx.accounts.into_transfer_to_client_bond_account(),
                 client_bond_amount,
             )?;
         }
 
         if executor_bond_amount > 0 {
             token::set_authority(
-                ctx.accounts.into_set_authority_executor_bond_context(),
+                _ctx.accounts.into_set_authority_executor_bond_context(),
                 AuthorityType::AccountOwner,
-                Some(*ctx.accounts.authority.to_account_info().key),
+                Some(*_ctx.accounts.authority.to_account_info().key),
             )?;
 
             token::transfer(
-                ctx.accounts.into_transfer_to_executor_bond_account(),
+                _ctx.accounts.into_transfer_to_executor_bond_account(),
                 executor_bond_amount,
             )?;
         }
@@ -225,38 +241,38 @@ pub mod deal_contract {
     }
 
     pub fn finish(
-        ctx: Context<Finish>, 
-        id: Vec<u8>
+        _ctx: Context<Finish>, 
+        _id: Vec<u8>
     ) -> Result<()> {
 
-        if !ctx.accounts.deal_state.is_started {
+        if !_ctx.accounts.deal_state.is_started {
             return Err(ErrorCode::NotStarted.into());
         }
         let seeds = &[
-            &id, 
+            &_id, 
             &AUTHORITY_SEED[..],
-            ctx.accounts.deal_state.client_key.as_ref(),
-            ctx.accounts.deal_state.executor_key.as_ref(),
-            &[ctx.accounts.deal_state.authority_bump]];
+            _ctx.accounts.deal_state.client_key.as_ref(),
+            _ctx.accounts.deal_state.executor_key.as_ref(),
+            &[_ctx.accounts.deal_state.authority_bump]];
 
         token::transfer(
-            ctx.accounts
+            _ctx.accounts
                 .into_transfer_to_executor_token_account_context()
                 .with_signer(&[&seeds[..]]),
-                ctx.accounts.deal_state.amount
+                _ctx.accounts.deal_state.amount
         )?;
         
-        if ctx.accounts.deal_state.checker_fee > 0 {
+        if _ctx.accounts.deal_state.checker_fee > 0 {
             token::transfer(
-                ctx.accounts
+                _ctx.accounts
                     .into_transfer_to_checker_token_account_context()
                     .with_signer(&[&seeds[..]]),
-                    ctx.accounts.deal_state.checker_fee
+                    _ctx.accounts.deal_state.checker_fee
             )?;
         } 
 
         token::close_account(
-            ctx.accounts
+            _ctx.accounts
                 .into_close_context()
                 .with_signer(&[&seeds[..]])
         )?;
@@ -265,56 +281,56 @@ pub mod deal_contract {
     }
 
     pub fn finish_with_bond(
-        ctx: Context<FinishWithBond>, 
-        id: Vec<u8>
+        _ctx: Context<FinishWithBond>, 
+        _id: Vec<u8>
     ) -> Result<()> {
 
-        if !ctx.accounts.deal_state.is_started {
+        if !_ctx.accounts.deal_state.is_started {
             return Err(ErrorCode::NotStarted.into());
         }
         let seeds = &[
-            &id, 
+            &_id, 
             &AUTHORITY_SEED[..],
-            ctx.accounts.deal_state.client_key.as_ref(),
-            ctx.accounts.deal_state.executor_key.as_ref(),
-            &[ctx.accounts.deal_state.authority_bump]];
+            _ctx.accounts.deal_state.client_key.as_ref(),
+            _ctx.accounts.deal_state.executor_key.as_ref(),
+            &[_ctx.accounts.deal_state.authority_bump]];
 
         token::transfer(
-            ctx.accounts
+            _ctx.accounts
                 .into_transfer_to_executor_token_account_context()
                 .with_signer(&[&seeds[..]]),
-                ctx.accounts.deal_state.amount
+                _ctx.accounts.deal_state.amount
         )?;
         
-        if ctx.accounts.deal_state.checker_fee > 0 {
+        if _ctx.accounts.deal_state.checker_fee > 0 {
             token::transfer(
-                ctx.accounts
+                _ctx.accounts
                     .into_transfer_to_checker_token_account_context()
                     .with_signer(&[&seeds[..]]),
-                    ctx.accounts.deal_state.checker_fee
+                    _ctx.accounts.deal_state.checker_fee
             )?;
         } 
 
-        if ctx.accounts.deal_state.client_bond_amount > 0 {
+        if _ctx.accounts.deal_state.client_bond_amount > 0 {
             token::transfer(
-                ctx.accounts
+                _ctx.accounts
                     .into_transfer_to_bond_client_token_account_context()
                     .with_signer(&[&seeds[..]]),
-                    ctx.accounts.deal_state.client_bond_amount
+                    _ctx.accounts.deal_state.client_bond_amount
             )?;
         }
 
-        if ctx.accounts.deal_state.executor_bond_amount > 0 {
+        if _ctx.accounts.deal_state.executor_bond_amount > 0 {
             token::transfer(
-                ctx.accounts
+                _ctx.accounts
                     .into_transfer_to_bond_executor_token_account_context()
                     .with_signer(&[&seeds[..]]),
-                    ctx.accounts.deal_state.executor_bond_amount
+                    _ctx.accounts.deal_state.executor_bond_amount
             )?;
         }
 
         token::close_account(
-            ctx.accounts
+            _ctx.accounts
                 .into_close_context()
                 .with_signer(&[&seeds[..]])
         )?;
@@ -323,45 +339,45 @@ pub mod deal_contract {
     }
 
     pub fn cancel(
-        ctx: Context<Cancel>,
-        id: Vec<u8>
+        _ctx: Context<Cancel>,
+        _id: Vec<u8>
     ) -> Result<()> {
 
-        if !ctx.accounts.deal_state.is_started {
+        if !_ctx.accounts.deal_state.is_started {
             return Err(ErrorCode::NotStarted.into());
         }
 
-        if ctx.accounts.deal_state.with_bond {
+        if _ctx.accounts.deal_state.with_bond {
             return Err(ErrorCode::NeedCancelWithBond.into());
         }
 
-        if ctx.accounts.deal_state.deadline_ts > 0 {
+        if _ctx.accounts.deal_state.deadline_ts > 0 {
             let clock = Clock::get()?;
             let current_ts = clock.unix_timestamp;
-            if current_ts > ctx.accounts.deal_state.deadline_ts {
+            if current_ts > _ctx.accounts.deal_state.deadline_ts {
                 return Err(ErrorCode::DeadlineNotCome.into());
             }
         }
 
         let seeds = &[
-            &id, 
+            &_id, 
             &AUTHORITY_SEED[..],
-            ctx.accounts.deal_state.client_key.as_ref(),
-            ctx.accounts.deal_state.executor_key.as_ref(),
-            &[ctx.accounts.deal_state.authority_bump]];
+            _ctx.accounts.deal_state.client_key.as_ref(),
+            _ctx.accounts.deal_state.executor_key.as_ref(),
+            &[_ctx.accounts.deal_state.authority_bump]];
 
 
-        let amount = ctx.accounts.deal_state.amount + ctx.accounts.deal_state.checker_fee;
+        let amount = _ctx.accounts.deal_state.amount + _ctx.accounts.deal_state.checker_fee;
         
         token::transfer(
-            ctx.accounts
+            _ctx.accounts
                 .into_transfer_to_client_token_account_context()
                 .with_signer(&[&seeds[..]]),
                 amount
         )?;
 
         token::close_account(
-            ctx.accounts
+            _ctx.accounts
                 .into_close_context()
                 .with_signer(&[&seeds[..]])
         )?;
@@ -370,63 +386,63 @@ pub mod deal_contract {
     }
 
     pub fn cancel_with_bond(
-        ctx: Context<CancelWithBond>,
-        id: Vec<u8>
+        _ctx: Context<CancelWithBond>,
+        _id: Vec<u8>
     ) -> Result<()> {
 
-        if !ctx.accounts.deal_state.is_started {
+        if !_ctx.accounts.deal_state.is_started {
             return Err(ErrorCode::NotStarted.into());
         }
 
-        if !ctx.accounts.deal_state.with_bond {
+        if !_ctx.accounts.deal_state.with_bond {
             return Err(ErrorCode::NeedCancelWithoutBond.into());
         }
 
-        if ctx.accounts.deal_state.deadline_ts > 0 {
+        if _ctx.accounts.deal_state.deadline_ts > 0 {
             let clock = Clock::get()?;
             let current_ts = clock.unix_timestamp;
-            if ctx.accounts.deal_state.deadline_ts > current_ts  {
+            if _ctx.accounts.deal_state.deadline_ts > current_ts  {
                 return Err(ErrorCode::DeadlineNotCome.into());
             }
         }
 
         let seeds = &[
-            &id, 
+            &_id, 
             &AUTHORITY_SEED[..],
-            ctx.accounts.deal_state.client_key.as_ref(),
-            ctx.accounts.deal_state.executor_key.as_ref(),
-            &[ctx.accounts.deal_state.authority_bump]];
+            _ctx.accounts.deal_state.client_key.as_ref(),
+            _ctx.accounts.deal_state.executor_key.as_ref(),
+            &[_ctx.accounts.deal_state.authority_bump]];
 
 
-        let amount = ctx.accounts.deal_state.amount + ctx.accounts.deal_state.checker_fee;
+        let amount = _ctx.accounts.deal_state.amount + _ctx.accounts.deal_state.checker_fee;
         
         token::transfer(
-            ctx.accounts
+            _ctx.accounts
                 .into_transfer_to_client_token_account_context()
                 .with_signer(&[&seeds[..]]),
                 amount
         )?;
 
-        if ctx.accounts.deal_state.client_bond_amount > 0 {
+        if _ctx.accounts.deal_state.client_bond_amount > 0 {
             token::transfer(
-                ctx.accounts
+                _ctx.accounts
                     .into_transfer_to_bond_client_token_account_context()
                     .with_signer(&[&seeds[..]]),
-                    ctx.accounts.deal_state.client_bond_amount
+                    _ctx.accounts.deal_state.client_bond_amount
             )?;
         }
 
-        if ctx.accounts.deal_state.executor_bond_amount > 0 {
+        if _ctx.accounts.deal_state.executor_bond_amount > 0 {
             token::transfer(
-                ctx.accounts
+                _ctx.accounts
                     .into_transfer_to_bond_executor_token_account_context()
                     .with_signer(&[&seeds[..]]),
-                    ctx.accounts.deal_state.executor_bond_amount
+                    _ctx.accounts.deal_state.executor_bond_amount
             )?;
         }
 
         token::close_account(
-            ctx.accounts
+            _ctx.accounts
                 .into_close_context()
                 .with_signer(&[&seeds[..]])
         )?;
@@ -435,8 +451,8 @@ pub mod deal_contract {
     }
 
     pub fn update_checker(
-        ctx: Context<UpdateChecker>,
-        id: Vec<u8>
+        _ctx: Context<UpdateChecker>,
+        _id: Vec<u8>
     ) -> Result<()> {
         // TODO: - 
         return Err(ErrorCode::NotImplemented.into());
@@ -1247,6 +1263,8 @@ pub enum ErrorCode {
     AmountTooLow,
     #[msg("The deadline has not yet come.")]
     DeadlineNotCome,
+    #[msg("Deadline expired")]
+    DeadlineExpired,
     #[msg("The deal need cancel with bond")]
     NeedCancelWithBond,
     #[msg("The deal need cancel without bond")]

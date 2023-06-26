@@ -13,7 +13,7 @@ describe("🤖 Tests Contractus smart-contract", () => {
   const program = anchor.workspace.DealContract as Program<DealContract>;
   const provider = anchor.AnchorProvider.env()
   anchor.setProvider(provider)
-
+  
   describe("👽️ Deals with third party checker (no performance bond)", ()=> {
     const clientTokenBalance = 10000;
     const otherTokenBalance = 500;
@@ -1001,7 +1001,8 @@ describe("🤖 Tests Contractus smart-contract", () => {
       }
     })
 
-    it("Create deal with bond and finish", async () => {
+    it("Create and finish deal with bond and deadline", async () => {
+
       await mintTo(provider.connection, payer, mintBond, bondClientTokenAccount, bondMintAuthority.publicKey, 100, [bondMintAuthority])
       await mintTo(provider.connection, payer, mintBond, bondExecutorTokenAccount, bondMintAuthority.publicKey, 100, [bondMintAuthority])
 
