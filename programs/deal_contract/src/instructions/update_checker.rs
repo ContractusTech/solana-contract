@@ -1,6 +1,7 @@
 use anchor_lang::prelude::*;
+use anchor_spl::token::Token;
 
-use crate::{constants::*, errors::ErrorCode, state::DealState};
+use crate::{constants::*, errors::ErrorCodes, state::DealState};
 
 #[derive(Accounts)]
 #[instruction(id: Vec<u8>)]
@@ -25,11 +26,10 @@ pub struct UpdateChecker<'info> {
         bump = deal_state.bump
     )]
     pub deal_state: Box<Account<'info, DealState>>,
-    /// CHECK: This is not dangerous because we don't read or write from this account
-    pub token_program: AccountInfo<'info>,
+    pub token_program: Program<'info, Token>,
 }
 
 pub fn handle(_ctx: Context<UpdateChecker>, _id: Vec<u8>) -> Result<()> {
     // TODO: -
-    return Err(ErrorCode::NotImplemented.into());
+    return Err(ErrorCodes::NotImplemented.into());
 }

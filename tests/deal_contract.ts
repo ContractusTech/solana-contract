@@ -1,5 +1,5 @@
-import * as anchor from "@project-serum/anchor";
-import { Program, AnchorProvider } from "@project-serum/anchor";
+import * as anchor from "@coral-xyz/anchor";
+import { Program, AnchorProvider } from "@coral-xyz/anchor";
 import { PublicKey, Keypair, SystemProgram, Transaction, Commitment } from '@solana/web3.js';
 import { TOKEN_PROGRAM_ID, createMint, createAccount, mintTo, getAccount } from "@solana/spl-token";
 import { DealContract } from "../target/types/deal_contract";

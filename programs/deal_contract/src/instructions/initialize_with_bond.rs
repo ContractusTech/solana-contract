@@ -1,10 +1,10 @@
 use anchor_lang::prelude::*;
 
 use anchor_spl::token::{
-    self, spl_token::instruction::AuthorityType, Mint, SetAuthority, TokenAccount, Transfer,
+    self, spl_token::instruction::AuthorityType, Mint, SetAuthority, TokenAccount, Transfer, Token,
 };
 
-use crate::{constants::*, errors::ErrorCode, state::DealState};
+use crate::{constants::*, errors::ErrorCodes, state::{DealState, DealStateType}};
 
 #[derive(Accounts)]
 #[instruction(id: Vec<u8>, amount: u64, client_bond_amount: u64, executor_bond_amount: u64, service_fee: u64, deadline_ts: i64, holder_mode: bool)]
@@ -50,10 +50,13 @@ pub struct InitializeBond<'info> {
     pub client_service_token_account: Box<Account<'info, TokenAccount>>,
     #[account(
         mut,
-        constraint = client_bond_account.owner.key() == *client.to_account_info().key,
-        constraint = client_bond_account.mint.key() == client_bond_mint.key(),
-        constraint = (client_bond_account.mint == mint.key() && client_bond_account.amount >= (client_bond_amount + service_fee + amount))
-            || (client_bond_account.mint.key() != mint.key() && client_bond_account.amount >= client_bond_amount)
+        constraint = client_bond_account.owner == *client.to_account_info().key,
+        constraint = client_bond_account.mint == client_bond_mint.key(),
+        constraint = 
+            (client_bond_account.mint == mint.key() 
+                && client_bond_account.amount >= (client_bond_amount + service_fee + amount))
+            || (client_bond_account.mint != mint.key() 
+                && client_bond_account.amount >= client_bond_amount)
     )]
     pub client_bond_account: Box<Account<'info, TokenAccount>>,
     pub client_bond_mint: Box<Account<'info, Mint>>,
@@ -119,11 +122,8 @@ pub struct InitializeBond<'info> {
         space = DealState::space()
     )]
     pub deal_state: Box<Account<'info, DealState>>,
-    /// CHECK: This is not dangerous because we don't read or write from this account
-    pub system_program: AccountInfo<'info>,
-    pub rent: Sysvar<'info, Rent>,
-    /// CHECK: This is not dangerous because we don't read or write from this account
-    pub token_program: AccountInfo<'info>,
+    pub system_program: Program<'info, System>,
+    pub token_program: Program<'info, Token>,
 }
 
 // Initialize Bond
@@ -134,7 +134,7 @@ impl<'info> InitializeBond<'info> {
             to: self.deposit_account.to_account_info(),
             authority: self.client.clone(),
         };
-        CpiContext::new(self.token_program.clone(), cpi_accounts)
+        CpiContext::new(self.token_program.to_account_info(), cpi_accounts)
     }
 
     fn into_transfer_to_service_account(&self) -> CpiContext<'_, '_, '_, 'info, Transfer<'info>> {
@@ -143,7 +143,7 @@ impl<'info> InitializeBond<'info> {
             to: self.service_fee_account.to_account_info(),
             authority: self.client.clone(),
         };
-        CpiContext::new(self.token_program.clone(), cpi_accounts)
+        CpiContext::new(self.token_program.to_account_info(), cpi_accounts)
     }
 
     fn into_transfer_to_holder_mode_account(
@@ -154,7 +154,7 @@ impl<'info> InitializeBond<'info> {
             to: self.holder_deposit_account.to_account_info(),
             authority: self.client.clone(),
         };
-        CpiContext::new(self.token_program.clone(), cpi_accounts)
+        CpiContext::new(self.token_program.to_account_info(), cpi_accounts)
     }
 
     fn into_transfer_to_executor_bond_account(
@@ -165,7 +165,7 @@ impl<'info> InitializeBond<'info> {
             to: self.deposit_executor_bond_account.to_account_info(),
             authority: self.executor.clone(),
         };
-        CpiContext::new(self.token_program.clone(), cpi_accounts)
+        CpiContext::new(self.token_program.to_account_info(), cpi_accounts)
     }
 
     fn into_transfer_to_client_bond_account(
@@ -176,7 +176,7 @@ impl<'info> InitializeBond<'info> {
             to: self.deposit_client_bond_account.to_account_info(),
             authority: self.client.clone(),
         };
-        CpiContext::new(self.token_program.clone(), cpi_accounts)
+        CpiContext::new(self.token_program.to_account_info(), cpi_accounts)
     }
 
     fn into_set_authority_context(&self) -> CpiContext<'_, '_, '_, 'info, SetAuthority<'info>> {
@@ -184,7 +184,7 @@ impl<'info> InitializeBond<'info> {
             account_or_mint: self.deposit_account.to_account_info(),
             current_authority: self.payer.clone(),
         };
-        CpiContext::new(self.token_program.clone(), cpi_accounts)
+        CpiContext::new(self.token_program.to_account_info(), cpi_accounts)
     }
 
     fn into_set_authority_holder_context(
@@ -194,7 +194,7 @@ impl<'info> InitializeBond<'info> {
             account_or_mint: self.holder_deposit_account.to_account_info(),
             current_authority: self.payer.clone(),
         };
-        CpiContext::new(self.token_program.clone(), cpi_accounts)
+        CpiContext::new(self.token_program.to_account_info(), cpi_accounts)
     }
 
     fn into_set_authority_executor_bond_context(
@@ -204,7 +204,7 @@ impl<'info> InitializeBond<'info> {
             account_or_mint: self.deposit_executor_bond_account.to_account_info(),
             current_authority: self.payer.clone(),
         };
-        CpiContext::new(self.token_program.clone(), cpi_accounts)
+        CpiContext::new(self.token_program.to_account_info(), cpi_accounts)
     }
 
     fn into_set_authority_client_bond_context(
@@ -214,12 +214,12 @@ impl<'info> InitializeBond<'info> {
             account_or_mint: self.deposit_client_bond_account.to_account_info(),
             current_authority: self.payer.clone(),
         };
-        CpiContext::new(self.token_program.clone(), cpi_accounts)
+        CpiContext::new(self.token_program.to_account_info(), cpi_accounts)
     }
 }
 
 pub fn handle(
-    _ctx: Context<InitializeBond>,
+    ctx: Context<InitializeBond>,
     _id: Vec<u8>,
     amount: u64,
     client_bond_amount: u64,
@@ -228,115 +228,104 @@ pub fn handle(
     deadline_ts: i64,
     holder_mode: bool,
 ) -> Result<()> {
-    if _ctx.accounts.deal_state.is_started {
-        return Err(ErrorCode::AlreadyStarted.into());
+    if ctx.accounts.deal_state.is_started {
+        return Err(ErrorCodes::AlreadyStarted.into());
     }
 
-    let clock = Clock::get()?;
-    let current_ts = clock.unix_timestamp;
+    let current_ts = Clock::get()?.unix_timestamp;
     if deadline_ts < current_ts {
-        return Err(ErrorCode::DeadlineExpired.into());
+        return Err(ErrorCodes::DeadlineExpired.into());
     }
 
     if amount == 0 {
-        return Err(ErrorCode::AmountTooLow.into());
+        return Err(ErrorCodes::AmountTooLow.into());
     }
-
-    let service_token_mint: Pubkey = SERVICE_TOKEN_ADDRESS_MINT;
 
     if holder_mode
-        && _ctx.accounts.client_service_token_account.amount < HOLDER_MODE_AMOUNT
-        && _ctx.accounts.client_service_token_account.mint != service_token_mint
-        && _ctx.accounts.client_token_account.mint != service_token_mint
+        && ctx.accounts.client_service_token_account.amount < HOLDER_MODE_AMOUNT
+        && ctx.accounts.client_service_token_account.mint != SERVICE_TOKEN_ADDRESS_MINT
+        && ctx.accounts.client_token_account.mint != SERVICE_TOKEN_ADDRESS_MINT
     {
-        return Err(ErrorCode::HolderModeUnavailable.into());
+        return Err(ErrorCodes::HolderModeUnavailable.into());
     }
     if !holder_mode && service_fee == 0 {
-        return Err(ErrorCode::FeeIsTooLow.into());
+        return Err(ErrorCodes::FeeIsTooLow.into());
     }
 
-    _ctx.accounts.deal_state.is_started = true;
+    **ctx.accounts.deal_state = DealState {
+        is_started: true,
+        
+        client_key: *ctx.accounts.client.key,
+        executor_key: *ctx.accounts.executor.to_account_info().key,
+        deposit_key: *ctx.accounts.deposit_account.to_account_info().key,
+        authority_key: *ctx.accounts.authority.to_account_info().key,
 
-    _ctx.accounts.deal_state.client_key = *_ctx.accounts.client.key;
-    _ctx.accounts.deal_state.executor_key = *_ctx.accounts.executor.to_account_info().key;
-    _ctx.accounts.deal_state.deposit_key = *_ctx.accounts.deposit_account.to_account_info().key;
-    _ctx.accounts.deal_state.authority_key = *_ctx.accounts.authority.to_account_info().key;
+        holder_mode_deposit_key:
+        *ctx.accounts.holder_deposit_account.to_account_info().key,
+        bump: *ctx.bumps.get("deal_state").unwrap(),
+        deposit_bump: *ctx.bumps.get("deposit_account").unwrap(),
+        authority_bump: *ctx.bumps.get("authority").unwrap(),
+        holder_deposit_bump:
+        *ctx.bumps.get("holder_deposit_account").unwrap(),
+        client_bond_deposit_bump:
+        *ctx.bumps.get("deposit_client_bond_account").unwrap(),
+        executor_bond_deposit_bump:
+        *ctx.bumps.get("deposit_executor_bond_account").unwrap(),
 
-    _ctx.accounts.deal_state.client_token_account_key =
-        *_ctx.accounts.client_token_account.to_account_info().key;
-    _ctx.accounts.deal_state.client_bond_deposit_key =
-        *_ctx.accounts.deposit_client_bond_account.to_account_info().key;
-    _ctx.accounts.deal_state.client_bond_token_account_key =
-        *_ctx.accounts.client_bond_account.to_account_info().key;
+        amount,
 
-    _ctx.accounts.deal_state.executor_token_account_key =
-        *_ctx.accounts.executor_token_account.to_account_info().key;
-    _ctx.accounts.deal_state.executor_bond_deposit_key =
-        *_ctx.accounts.deposit_executor_bond_account.to_account_info().key;
-    _ctx.accounts.deal_state.executor_bond_token_account_key =
-        *_ctx.accounts.executor_bond_account.to_account_info().key;
+        deadline_ts,
 
-    _ctx.accounts.deal_state.holder_mode_deposit_key =
-        *_ctx.accounts.holder_deposit_account.to_account_info().key;
+        _type: DealStateType::WithBond { 
+            client_bond_deposit_key:
+            *ctx.accounts.deposit_client_bond_account.to_account_info().key,
+            executor_bond_deposit_key:
+            *ctx.accounts.deposit_executor_bond_account.to_account_info().key,
+            client_bond_amount,
+            executor_bond_amount,
 
-    // ctx.accounts.deal_state.service_key = Pubkey::from_str(SERVICE_ACCOUNT_ADDRESS).unwrap();
-
-    _ctx.accounts.deal_state.bump = *_ctx.bumps.get("deal_state").unwrap();
-    _ctx.accounts.deal_state.deposit_bump = *_ctx.bumps.get("deposit_account").unwrap();
-    _ctx.accounts.deal_state.authority_bump = *_ctx.bumps.get("authority").unwrap();
-    _ctx.accounts.deal_state.holder_deposit_bump =
-        *_ctx.bumps.get("holder_deposit_account").unwrap();
-    _ctx.accounts.deal_state.client_bond_deposit_bump =
-        *_ctx.bumps.get("deposit_client_bond_account").unwrap();
-    _ctx.accounts.deal_state.executor_bond_deposit_bump =
-        *_ctx.bumps.get("deposit_executor_bond_account").unwrap();
-
-    _ctx.accounts.deal_state.amount = amount;
-    _ctx.accounts.deal_state.client_bond_amount = client_bond_amount;
-    _ctx.accounts.deal_state.executor_bond_amount = executor_bond_amount;
-
-    _ctx.accounts.deal_state.with_bond = true;
-    _ctx.accounts.deal_state.deadline_ts = deadline_ts;
+        }
+    };
 
     token::set_authority(
-        _ctx.accounts.into_set_authority_context(),
+        ctx.accounts.into_set_authority_context(),
         AuthorityType::AccountOwner,
-        Some(*_ctx.accounts.authority.to_account_info().key),
+        Some(*ctx.accounts.authority.to_account_info().key),
     )?;
 
     token::set_authority(
-        _ctx.accounts.into_set_authority_holder_context(),
+        ctx.accounts.into_set_authority_holder_context(),
         AuthorityType::AccountOwner,
-        Some(*_ctx.accounts.authority.to_account_info().key),
+        Some(*ctx.accounts.authority.to_account_info().key),
     )?;
 
-    token::transfer(_ctx.accounts.into_transfer_to_pda_context(), amount)?;
+    token::transfer(ctx.accounts.into_transfer_to_pda_context(), amount)?;
 
     if holder_mode {
-        token::transfer(_ctx.accounts.into_transfer_to_holder_mode_account(), HOLDER_MODE_AMOUNT)?;
+        token::transfer(ctx.accounts.into_transfer_to_holder_mode_account(), HOLDER_MODE_AMOUNT)?;
     } else if service_fee > 0 {
-        token::transfer(_ctx.accounts.into_transfer_to_service_account(), service_fee)?;
+        token::transfer(ctx.accounts.into_transfer_to_service_account(), service_fee)?;
     }
 
     if client_bond_amount > 0 {
         token::set_authority(
-            _ctx.accounts.into_set_authority_client_bond_context(),
+            ctx.accounts.into_set_authority_client_bond_context(),
             AuthorityType::AccountOwner,
-            Some(*_ctx.accounts.authority.to_account_info().key),
+            Some(*ctx.accounts.authority.to_account_info().key),
         )?;
 
-        token::transfer(_ctx.accounts.into_transfer_to_client_bond_account(), client_bond_amount)?;
+        token::transfer(ctx.accounts.into_transfer_to_client_bond_account(), client_bond_amount)?;
     }
 
     if executor_bond_amount > 0 {
         token::set_authority(
-            _ctx.accounts.into_set_authority_executor_bond_context(),
+            ctx.accounts.into_set_authority_executor_bond_context(),
             AuthorityType::AccountOwner,
-            Some(*_ctx.accounts.authority.to_account_info().key),
+            Some(*ctx.accounts.authority.to_account_info().key),
         )?;
 
         token::transfer(
-            _ctx.accounts.into_transfer_to_executor_bond_account(),
+            ctx.accounts.into_transfer_to_executor_bond_account(),
             executor_bond_amount,
         )?;
     }

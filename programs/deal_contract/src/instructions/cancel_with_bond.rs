@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token::{self, CloseAccount, TokenAccount, Transfer};
+use anchor_spl::{token::{self, CloseAccount, TokenAccount, Transfer, Token}, token_interface::spl_token_2022::cmp_pubkeys};
 
-use crate::{constants::*, errors::ErrorCode, state::DealState};
+use crate::{constants::*, errors::ErrorCodes, state::DealState};
 
 #[derive(Accounts)]
 #[instruction(id: Vec<u8>)]
@@ -23,40 +23,45 @@ pub struct CancelWithBond<'info> {
     /// CHECK: This is not dangerous because we don't read or write from this account
     #[account(
         mut,
-        constraint = *client_token_account.to_account_info().key == deal_state.client_token_account_key
+        // FIXME
+        // constraint = *client_token_account.to_account_info().key == deal_state.client_token_account_key
     )]
     pub client_token_account: Account<'info, TokenAccount>,
     #[account(
         mut,
-        constraint = *client_bond_account.to_account_info().key == deal_state.client_bond_token_account_key
+        // FIXME
+        // constraint = *client_bond_account.to_account_info().key == deal_state.client_bond_token_account_key
     )]
     pub client_bond_account: Box<Account<'info, TokenAccount>>,
     #[account(
         mut,
-        constraint = *executor_bond_account.to_account_info().key == deal_state.executor_bond_token_account_key
+        // FIXME
+        // constraint = *executor_bond_account.to_account_info().key == deal_state.executor_bond_token_account_key
     )]
     pub executor_bond_account: Box<Account<'info, TokenAccount>>,
     #[account(
         mut,
-        constraint = *deposit_client_bond_account.to_account_info().key == deal_state.client_bond_deposit_key
+        constraint = cmp_pubkeys(deposit_client_bond_account.to_account_info().key, deal_state.client_bond_deposit_key()?)
     )]
     pub deposit_client_bond_account: Box<Account<'info, TokenAccount>>,
     #[account(
         mut,
-        constraint = *deposit_executor_bond_account.to_account_info().key == deal_state.executor_bond_deposit_key
+        constraint = cmp_pubkeys(deposit_executor_bond_account.to_account_info().key, deal_state.executor_bond_deposit_key()?)
     )]
     pub deposit_executor_bond_account: Box<Account<'info, TokenAccount>>,
     #[account(
         mut,
         seeds = [&id, b"state".as_ref(), deal_state.client_key.as_ref(), deal_state.executor_key.as_ref()],
         bump = deal_state.bump,
-        constraint = (*initializer.to_account_info().key == deal_state.client_key || *initializer.to_account_info().key == deal_state.executor_key || *initializer.to_account_info().key == deal_state.checker_key 
-      || *initializer.to_account_info().key == SERVICE_ACCOUNT_ADDRESS),
+        constraint = 
+        (*initializer.to_account_info().key == deal_state.client_key 
+            || *initializer.to_account_info().key == deal_state.executor_key 
+            || cmp_pubkeys(initializer.to_account_info().key, deal_state.checker_key()?) 
+            || *initializer.to_account_info().key == SERVICE_ACCOUNT_ADDRESS),
         close = initializer
     )]
     pub deal_state: Box<Account<'info, DealState>>,
-    /// CHECK: This is not dangerous because we don't read or write from this account
-    pub token_program: AccountInfo<'info>,
+    pub token_program: Program<'info, Token>,
 }
 
 // Cancel With Bond
@@ -106,18 +111,14 @@ impl<'info> CancelWithBond<'info> {
 
 pub fn handle(ctx: Context<CancelWithBond>, id: Vec<u8>) -> Result<()> {
     if !ctx.accounts.deal_state.is_started {
-        return Err(ErrorCode::NotStarted.into());
-    }
-
-    if !ctx.accounts.deal_state.with_bond {
-        return Err(ErrorCode::NeedCancelWithoutBond.into());
+        return Err(ErrorCodes::NotStarted.into());
     }
 
     if ctx.accounts.deal_state.deadline_ts > 0 {
         let clock = Clock::get()?;
         let current_ts = clock.unix_timestamp;
         if ctx.accounts.deal_state.deadline_ts > current_ts {
-            return Err(ErrorCode::DeadlineNotCome.into());
+            return Err(ErrorCodes::DeadlineNotCome.into());
         }
     }
 
@@ -129,7 +130,7 @@ pub fn handle(ctx: Context<CancelWithBond>, id: Vec<u8>) -> Result<()> {
         &[ctx.accounts.deal_state.authority_bump],
     ];
 
-    let amount = ctx.accounts.deal_state.amount + ctx.accounts.deal_state.checker_fee;
+    let amount = ctx.accounts.deal_state.amount + ctx.accounts.deal_state.checker_fee()?; // FIXME ??
 
     token::transfer(
         ctx.accounts
@@ -138,21 +139,21 @@ pub fn handle(ctx: Context<CancelWithBond>, id: Vec<u8>) -> Result<()> {
         amount,
     )?;
 
-    if ctx.accounts.deal_state.client_bond_amount > 0 {
+    if ctx.accounts.deal_state.client_bond_amount()? > 0 {
         token::transfer(
             ctx.accounts
                 .into_transfer_to_bond_client_token_account_context()
                 .with_signer(&[&seeds[..]]),
-            ctx.accounts.deal_state.client_bond_amount,
+            ctx.accounts.deal_state.client_bond_amount()?,
         )?;
     }
 
-    if ctx.accounts.deal_state.executor_bond_amount > 0 {
+    if ctx.accounts.deal_state.executor_bond_amount()? > 0 {
         token::transfer(
             ctx.accounts
                 .into_transfer_to_bond_executor_token_account_context()
                 .with_signer(&[&seeds[..]]),
-            ctx.accounts.deal_state.executor_bond_amount,
+            ctx.accounts.deal_state.executor_bond_amount()?,
         )?;
     }
 

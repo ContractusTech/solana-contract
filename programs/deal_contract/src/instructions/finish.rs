@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token::{self, CloseAccount, TokenAccount, Transfer};
+use anchor_spl::{token::{self, CloseAccount, Token, TokenAccount, Transfer}, token_interface::spl_token_2022::cmp_pubkeys};
 
-use crate::{constants::*, errors::ErrorCode, state::DealState};
+use crate::{constants::*, errors::ErrorCodes, state::DealState};
 
 #[derive(Accounts)]
 #[instruction(id: Vec<u8>)]
@@ -27,13 +27,15 @@ pub struct Finish<'info> {
     pub holder_deposit_account: Box<Account<'info, TokenAccount>>,
     #[account(
         mut,
-        constraint = deal_state.executor_token_account_key == *executor_token_account.to_account_info().key,
+        // FIXME
+        // constraint = deal_state.executor_token_account_key == *executor_token_account.to_account_info().key,
     )]
     pub executor_token_account: Account<'info, TokenAccount>,
     /// CHECK: This is not dangerous because we don't read or write from this account
     #[account(
         mut,
-        constraint = deal_state.checker_token_account_key == *checker_token_account.to_account_info().key,
+        // FIXME
+        // constraint = deal_state.checker_token_account_key == *checker_token_account.to_account_info().key,
     )]
     pub checker_token_account: Account<'info, TokenAccount>,
 
@@ -41,15 +43,16 @@ pub struct Finish<'info> {
         mut,
         seeds = [&id, b"state".as_ref(), deal_state.client_key.as_ref(), deal_state.executor_key.as_ref()],
         bump = deal_state.bump,
-        constraint = (*initializer.to_account_info().key == deal_state.client_key || *initializer.to_account_info().key == deal_state.checker_key),
+        constraint = (*initializer.to_account_info().key == deal_state.client_key 
+            || cmp_pubkeys(initializer.to_account_info().key, deal_state.checker_key()?)),
         constraint = deal_state.deposit_key == *deposit_account.to_account_info().key,
-        constraint = *executor_token_account.to_account_info().key == deal_state.executor_token_account_key,
-        constraint = *checker_token_account.to_account_info().key == deal_state.checker_token_account_key,
+        // FIXME
+        // constraint = *executor_token_account.to_account_info().key == deal_state.executor_token_account_key,
+        // constraint = *checker_token_account.to_account_info().key == deal_state.checker_token_account_key,
         close = initializer
     )]
     pub deal_state: Box<Account<'info, DealState>>,
-    /// CHECK: This is not dangerous because we don't read or write from this account
-    pub token_program: AccountInfo<'info>,
+    pub token_program: Program<'info, Token>,
 }
 
 // Finish
@@ -88,7 +91,7 @@ impl<'info> Finish<'info> {
 
 pub fn handle(_ctx: Context<Finish>, _id: Vec<u8>) -> Result<()> {
     if !_ctx.accounts.deal_state.is_started {
-        return Err(ErrorCode::NotStarted.into());
+        return Err(ErrorCodes::NotStarted.into());
     }
     let seeds = &[
         &_id,
@@ -105,12 +108,12 @@ pub fn handle(_ctx: Context<Finish>, _id: Vec<u8>) -> Result<()> {
         _ctx.accounts.deal_state.amount,
     )?;
 
-    if _ctx.accounts.deal_state.checker_fee > 0 {
+    if _ctx.accounts.deal_state.checker_fee()? > 0 {
         token::transfer(
             _ctx.accounts
                 .into_transfer_to_checker_token_account_context()
                 .with_signer(&[&seeds[..]]),
-            _ctx.accounts.deal_state.checker_fee,
+            _ctx.accounts.deal_state.checker_fee()?,
         )?;
     }
 
