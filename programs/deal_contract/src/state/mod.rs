@@ -17,7 +17,6 @@ pub enum DealStateType {
 
 #[account]
 pub struct DealState {
-    pub is_started: bool, // FIXME
     pub _type: DealStateType,
     pub client_key: Pubkey,
 
@@ -26,14 +25,12 @@ pub struct DealState {
     pub deposit_key: Pubkey,
     pub holder_mode_deposit_key: Pubkey,
 
-    pub authority_key: Pubkey,
     pub amount: u64,
 
     pub deadline_ts: i64,
 
     pub bump: u8,
     pub deposit_bump: u8,
-    pub authority_bump: u8,
     pub holder_deposit_bump: u8,
     pub client_bond_deposit_bump: u8,
     pub executor_bond_deposit_bump: u8,

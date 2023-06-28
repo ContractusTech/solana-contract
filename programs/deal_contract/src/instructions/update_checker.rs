@@ -22,7 +22,7 @@ pub struct UpdateChecker<'info> {
 
     #[account(
         mut,
-        seeds = [&id, b"state".as_ref(), deal_state.client_key.as_ref(), deal_state.executor_key.as_ref()],
+        seeds = [&id, DEAL_STATE_SEED.as_ref(), deal_state.client_key.as_ref(), deal_state.executor_key.as_ref()],
         bump = deal_state.bump
     )]
     pub deal_state: Box<Account<'info, DealState>>,

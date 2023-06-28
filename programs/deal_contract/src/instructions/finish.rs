@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 use anchor_spl::{token::{self, CloseAccount, Token, TokenAccount, Transfer}, token_interface::spl_token_2022::cmp_pubkeys};
 
-use crate::{constants::*, errors::ErrorCodes, state::DealState};
+use crate::{constants::*, state::DealState};
 
 #[derive(Accounts)]
 #[instruction(id: Vec<u8>)]
@@ -9,11 +9,6 @@ pub struct Finish<'info> {
     /// CHECK: This is not dangerous because we don't read or write from this account
     #[account(mut, signer)]
     pub initializer: AccountInfo<'info>,
-    /// CHECK: This is not dangerous because we don't read or write from this account
-    #[account(
-        constraint = *authority.to_account_info().key == deal_state.authority_key
-    )]
-    pub authority: AccountInfo<'info>,
     #[account(
         mut,
         constraint = deal_state.deposit_key == *deposit_account.to_account_info().key,
@@ -63,7 +58,7 @@ impl<'info> Finish<'info> {
         let cpi_accounts = Transfer {
             from: self.deposit_account.to_account_info(),
             to: self.executor_token_account.to_account_info(),
-            authority: self.authority.clone(),
+            authority: self.deal_state.to_account_info(),
         };
         CpiContext::new(self.token_program.to_account_info(), cpi_accounts)
     }
@@ -74,7 +69,7 @@ impl<'info> Finish<'info> {
         let cpi_accounts = Transfer {
             from: self.deposit_account.to_account_info(),
             to: self.checker_token_account.to_account_info(),
-            authority: self.authority.clone(),
+            authority: self.deal_state.to_account_info(),
         };
         CpiContext::new(self.token_program.to_account_info(), cpi_accounts)
     }
@@ -83,41 +78,37 @@ impl<'info> Finish<'info> {
         let cpi_accounts = CloseAccount {
             account: self.deposit_account.to_account_info(),
             destination: self.initializer.to_account_info(),
-            authority: self.authority.clone(),
+            authority: self.deal_state.to_account_info(),
         };
         CpiContext::new(self.token_program.to_account_info(), cpi_accounts)
     }
 }
 
-pub fn handle(_ctx: Context<Finish>, _id: Vec<u8>) -> Result<()> {
-    if !_ctx.accounts.deal_state.is_started {
-        return Err(ErrorCodes::NotStarted.into());
-    }
-    let seeds = &[
-        &_id,
-        &AUTHORITY_SEED[..],
-        _ctx.accounts.deal_state.client_key.as_ref(),
-        _ctx.accounts.deal_state.executor_key.as_ref(),
-        &[_ctx.accounts.deal_state.authority_bump],
+pub fn handle(ctx: Context<Finish>, id: Vec<u8>) -> Result<()> {
+    let seeds = [&id, 
+        DEAL_STATE_SEED.as_ref(), 
+        ctx.accounts.deal_state.client_key.as_ref(), 
+        ctx.accounts.deal_state.executor_key.as_ref(),
+        &[*ctx.bumps.get("deal_state").unwrap()]
     ];
 
     token::transfer(
-        _ctx.accounts
+        ctx.accounts
             .into_transfer_to_executor_token_account_context()
             .with_signer(&[&seeds[..]]),
-        _ctx.accounts.deal_state.amount,
+        ctx.accounts.deal_state.amount,
     )?;
 
-    if _ctx.accounts.deal_state.checker_fee()? > 0 {
+    if ctx.accounts.deal_state.checker_fee()? > 0 {
         token::transfer(
-            _ctx.accounts
+            ctx.accounts
                 .into_transfer_to_checker_token_account_context()
                 .with_signer(&[&seeds[..]]),
-            _ctx.accounts.deal_state.checker_fee()?,
+            ctx.accounts.deal_state.checker_fee()?,
         )?;
     }
 
-    token::close_account(_ctx.accounts.into_close_context().with_signer(&[&seeds[..]]))?;
+    token::close_account(ctx.accounts.into_close_context().with_signer(&[&seeds[..]]))?;
 
     Ok(())
 }

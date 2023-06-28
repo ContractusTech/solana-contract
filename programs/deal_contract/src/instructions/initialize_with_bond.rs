@@ -72,23 +72,13 @@ pub struct InitializeBond<'info> {
     pub mint: Box<Account<'info, Mint>>,
     #[account(
         init_if_needed,
-        seeds = [&id, b"deposit".as_ref(), client.to_account_info().key.as_ref(), executor.to_account_info().key.as_ref()],
-        bump,
         payer = payer,
         token::mint = mint,
         token::authority = payer,
     )]
     pub deposit_account: Box<Account<'info, TokenAccount>>,
-    /// CHECK: This is not dangerous because we don't read or write from this account
-    #[account(
-        seeds = [&id, b"auth".as_ref(), client.to_account_info().key.as_ref(), executor.to_account_info().key.as_ref()],
-        bump,
-    )]
-    pub authority: AccountInfo<'info>,
     #[account(
         init_if_needed,
-        seeds = [&id, b"deposit_bond_client".as_ref(), client.to_account_info().key.as_ref(), executor.to_account_info().key.as_ref()],
-        bump,
         payer = payer,
         token::mint = client_bond_mint,
         token::authority = payer,
@@ -96,8 +86,6 @@ pub struct InitializeBond<'info> {
     pub deposit_client_bond_account: Box<Account<'info, TokenAccount>>,
     #[account(
         init_if_needed,
-        seeds = [&id, b"deposit_bond_executor".as_ref(), client.to_account_info().key.as_ref(), executor.to_account_info().key.as_ref()],
-        bump,
         payer = payer,
         token::mint = executor_bond_mint,
         token::authority = payer,
@@ -105,8 +93,6 @@ pub struct InitializeBond<'info> {
     pub deposit_executor_bond_account: Box<Account<'info, TokenAccount>>,
     #[account(
         init_if_needed,
-        seeds = [&id, b"holder_deposit".as_ref(), client.to_account_info().key.as_ref(), executor.to_account_info().key.as_ref()],
-        bump,
         payer = payer,
         token::mint = holder_mint,
         token::authority = payer,
@@ -116,7 +102,7 @@ pub struct InitializeBond<'info> {
 
     #[account(
         init_if_needed,
-        seeds = [&id, b"state".as_ref(), client.to_account_info().key.as_ref(), executor.to_account_info().key.as_ref()],
+        seeds = [&id, DEAL_STATE_SEED, client.to_account_info().key.as_ref(), executor.to_account_info().key.as_ref()],
         bump,
         payer = payer, 
         space = DealState::space()
@@ -228,10 +214,6 @@ pub fn handle(
     deadline_ts: i64,
     holder_mode: bool,
 ) -> Result<()> {
-    if ctx.accounts.deal_state.is_started {
-        return Err(ErrorCodes::AlreadyStarted.into());
-    }
-
     let current_ts = Clock::get()?.unix_timestamp;
     if deadline_ts < current_ts {
         return Err(ErrorCodes::DeadlineExpired.into());
@@ -253,18 +235,14 @@ pub fn handle(
     }
 
     **ctx.accounts.deal_state = DealState {
-        is_started: true,
-        
         client_key: *ctx.accounts.client.key,
         executor_key: *ctx.accounts.executor.to_account_info().key,
         deposit_key: *ctx.accounts.deposit_account.to_account_info().key,
-        authority_key: *ctx.accounts.authority.to_account_info().key,
 
         holder_mode_deposit_key:
         *ctx.accounts.holder_deposit_account.to_account_info().key,
         bump: *ctx.bumps.get("deal_state").unwrap(),
         deposit_bump: *ctx.bumps.get("deposit_account").unwrap(),
-        authority_bump: *ctx.bumps.get("authority").unwrap(),
         holder_deposit_bump:
         *ctx.bumps.get("holder_deposit_account").unwrap(),
         client_bond_deposit_bump:
@@ -290,13 +268,13 @@ pub fn handle(
     token::set_authority(
         ctx.accounts.into_set_authority_context(),
         AuthorityType::AccountOwner,
-        Some(*ctx.accounts.authority.to_account_info().key),
+        Some(*ctx.accounts.deal_state.to_account_info().key),
     )?;
 
     token::set_authority(
         ctx.accounts.into_set_authority_holder_context(),
         AuthorityType::AccountOwner,
-        Some(*ctx.accounts.authority.to_account_info().key),
+        Some(*ctx.accounts.deal_state.to_account_info().key),
     )?;
 
     token::transfer(ctx.accounts.into_transfer_to_pda_context(), amount)?;
@@ -311,7 +289,7 @@ pub fn handle(
         token::set_authority(
             ctx.accounts.into_set_authority_client_bond_context(),
             AuthorityType::AccountOwner,
-            Some(*ctx.accounts.authority.to_account_info().key),
+            Some(*ctx.accounts.deal_state.to_account_info().key),
         )?;
 
         token::transfer(ctx.accounts.into_transfer_to_client_bond_account(), client_bond_amount)?;
@@ -321,7 +299,7 @@ pub fn handle(
         token::set_authority(
             ctx.accounts.into_set_authority_executor_bond_context(),
             AuthorityType::AccountOwner,
-            Some(*ctx.accounts.authority.to_account_info().key),
+            Some(*ctx.accounts.deal_state.to_account_info().key),
         )?;
 
         token::transfer(

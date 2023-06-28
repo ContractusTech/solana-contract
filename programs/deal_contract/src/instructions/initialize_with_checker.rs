@@ -1,12 +1,12 @@
 use crate::{
-    constants::{HOLDER_MODE_AMOUNT, SERVICE_TOKEN_ADDRESS_MINT},
+    constants::*,
     errors::ErrorCodes,
     state::{DealState, DealStateType},
 };
 use anchor_lang::prelude::*;
-use anchor_spl::token::{
+use anchor_spl::{token::{
     self, spl_token::instruction::AuthorityType, Mint, SetAuthority, TokenAccount, Transfer, Token,
-};
+}, token_interface::spl_token_2022::cmp_pubkeys};
 
 #[derive(Accounts)]
 #[instruction(id: Vec<u8>, amount: u64, service_fee: u64, checker_fee: u64, holder_mode: bool)]
@@ -30,7 +30,7 @@ pub struct Initialize<'info> {
     pub payer: AccountInfo<'info>,
     #[account(
         mut,
-        constraint = service_fee_account.mint.key() == client_token_account.mint.key()
+        constraint = cmp_pubkeys(&service_fee_account.mint, &client_token_account.mint.key())
     )]
     pub service_fee_account: Box<Account<'info, TokenAccount>>,
     #[account(
@@ -46,7 +46,7 @@ pub struct Initialize<'info> {
         constraint = client_token_account.amount >= (amount + service_fee + checker_fee),
         constraint = (holder_mode && client_token_account.mint == SERVICE_TOKEN_ADDRESS_MINT 
             && client_token_account.amount > (amount + service_fee + checker_fee + HOLDER_MODE_AMOUNT)) 
-                        || !holder_mode
+            || !holder_mode
     )]
     pub client_token_account: Box<Account<'info, TokenAccount>>,
     #[account(
@@ -63,33 +63,24 @@ pub struct Initialize<'info> {
     pub mint: Box<Account<'info, Mint>>,
     #[account(
         init_if_needed,
-        // seeds = [&id, b"deposit".as_ref(), client.to_account_info().key.as_ref(), executor.to_account_info().key.as_ref()],
-        // bump,
         payer = payer,
         token::mint = mint,
-        token::authority = payer,
+        token::authority = deal_state,
     )]
     pub deposit_account: Box<Account<'info, TokenAccount>>,
     #[account(
         init_if_needed,
-        // seeds = [&id, b"holder_deposit".as_ref(), client.to_account_info().key.as_ref(), executor.to_account_info().key.as_ref()],
-        // bump,
         payer = payer,
         token::mint = holder_mint,
-        token::authority = payer,
+        token::authority = deal_state,
     )]
     pub holder_deposit_account: Box<Account<'info, TokenAccount>>,
+    #[account(address = HOLDER_MINT)]
     pub holder_mint: Box<Account<'info, Mint>>,
-    /// CHECK: This is not dangerous because we don't read or write from this account
-    #[account(
-        seeds = [&id, b"auth".as_ref(), client.to_account_info().key.as_ref(), executor.to_account_info().key.as_ref()],
-        bump,
-    )]
-    pub authority: AccountInfo<'info>,
 
     #[account(
         init_if_needed,
-        seeds = [&id, b"state".as_ref(), client.to_account_info().key.as_ref(), executor.to_account_info().key.as_ref()],
+        seeds = [&id, DEAL_STATE_SEED, client.to_account_info().key.as_ref(), executor.to_account_info().key.as_ref()],
         bump,
         payer = payer, 
         space = DealState::space()
@@ -157,10 +148,6 @@ pub fn handle(
     checker_fee: u64,
     holder_mode: bool,
 ) -> Result<()> {
-    if ctx.accounts.deal_state.is_started {
-        return Err(ErrorCodes::AlreadyStarted.into());
-    }
-
     if amount == 0 {
         return Err(ErrorCodes::AmountTooLow.into());
     }
@@ -179,18 +166,14 @@ pub fn handle(
     }
 
     **ctx.accounts.deal_state = DealState {
-        is_started: true,
-        
         client_key: *ctx.accounts.client.key,
         executor_key: *ctx.accounts.executor.to_account_info().key,
         deposit_key: *ctx.accounts.deposit_account.to_account_info().key,
-        authority_key: *ctx.accounts.authority.to_account_info().key,
 
         holder_mode_deposit_key:
         *ctx.accounts.holder_deposit_account.to_account_info().key,
         bump: *ctx.bumps.get("deal_state").unwrap(),
         deposit_bump: *ctx.bumps.get("deposit_account").unwrap(),
-        authority_bump: *ctx.bumps.get("authority").unwrap(),
         holder_deposit_bump:
         *ctx.bumps.get("holder_deposit_account").unwrap(),
         client_bond_deposit_bump:
@@ -200,7 +183,7 @@ pub fn handle(
 
         amount,
 
-        deadline_ts: 0, // FIXME
+        deadline_ts: 0,
 
         _type: DealStateType::WithChecker {
             checker_fee, 
@@ -212,13 +195,13 @@ pub fn handle(
     token::set_authority(
         ctx.accounts.into_set_authority_context(),
         AuthorityType::AccountOwner,
-        Some(*ctx.accounts.authority.to_account_info().key),
+        Some(*ctx.accounts.deal_state.to_account_info().key),
     )?;
 
     token::set_authority(
         ctx.accounts.into_set_authority_holder_context(),
         AuthorityType::AccountOwner,
-        Some(*ctx.accounts.authority.to_account_info().key),
+        Some(*ctx.accounts.deal_state.to_account_info().key),
     )?;
 
     token::transfer(ctx.accounts.into_transfer_to_pda_context(), amount + checker_fee)?;

@@ -9,11 +9,6 @@ pub struct Cancel<'info> {
     /// CHECK: This is not dangerous because we don't read or write from this account
     #[account(mut, signer)]
     pub initializer: AccountInfo<'info>,
-    /// CHECK: This is not dangerous because we don't read or write from this account
-    #[account(
-        constraint = *authority.to_account_info().key == deal_state.authority_key
-    )]
-    pub authority: AccountInfo<'info>,
     #[account(
         mut,
         constraint = deal_state.deposit_key == *deposit_account.to_account_info().key
@@ -27,7 +22,7 @@ pub struct Cancel<'info> {
     pub client_token_account: Account<'info, TokenAccount>,
     #[account(
         mut,
-        seeds = [&id, b"state".as_ref(), deal_state.client_key.as_ref(), deal_state.executor_key.as_ref()],
+        seeds = [&id, DEAL_STATE_SEED.as_ref(), deal_state.client_key.as_ref(), deal_state.executor_key.as_ref()],
         bump = deal_state.bump,
         constraint = 
         (*initializer.to_account_info().key == deal_state.client_key 
@@ -48,7 +43,7 @@ impl<'info> Cancel<'info> {
         let cpi_accounts = Transfer {
             from: self.deposit_account.to_account_info(),
             to: self.client_token_account.to_account_info(),
-            authority: self.authority.clone(),
+            authority: self.deal_state.to_account_info().clone(),
         };
         CpiContext::new(self.token_program.to_account_info(), cpi_accounts)
     }
@@ -57,17 +52,13 @@ impl<'info> Cancel<'info> {
         let cpi_accounts = CloseAccount {
             account: self.deposit_account.to_account_info(),
             destination: self.initializer.to_account_info(),
-            authority: self.authority.clone(),
+            authority: self.deal_state.to_account_info().clone(),
         };
         CpiContext::new(self.token_program.to_account_info(), cpi_accounts)
     }
 }
 
-pub fn handle(ctx: Context<Cancel>, _id: Vec<u8>) -> Result<()> {
-    if !ctx.accounts.deal_state.is_started {
-        return Err(ErrorCodes::NotStarted.into());
-    }
-
+pub fn handle(ctx: Context<Cancel>, id: Vec<u8>) -> Result<()> {
     if ctx.accounts.deal_state.deadline_ts > 0 {
         let current_ts = Clock::get()?.unix_timestamp;
         if current_ts > ctx.accounts.deal_state.deadline_ts {
@@ -75,12 +66,11 @@ pub fn handle(ctx: Context<Cancel>, _id: Vec<u8>) -> Result<()> {
         }
     }
 
-    let seeds = &[
-        &_id,
-        &AUTHORITY_SEED[..],
-        ctx.accounts.deal_state.client_key.as_ref(),
+    let seeds = [&id, 
+        DEAL_STATE_SEED.as_ref(), 
+        ctx.accounts.deal_state.client_key.as_ref(), 
         ctx.accounts.deal_state.executor_key.as_ref(),
-        &[ctx.accounts.deal_state.authority_bump],
+        &[*ctx.bumps.get("deal_state").unwrap()]
     ];
 
     let amount = ctx.accounts.deal_state.amount + ctx.accounts.deal_state.checker_fee()?;

@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 use solana_program::pubkey;
 
-pub const AUTHORITY_SEED: &[u8] = b"auth";
+pub const DEAL_STATE_SEED: &[u8] = b"state";
 
 // NEED CHECK: CTUS address
 // Devnet: CyhjLfsfDz7rtszqBGaHiFrBbck2LNKEXQkywqNrGVyw
@@ -18,3 +18,5 @@ pub const SERVICE_ACCOUNT_ADDRESS: Pubkey = pubkey!("TokenkegQfeZyiNwAJbNbGKPFXC
 
 // NEED CHECK: 10_000 CTUS
 pub const HOLDER_MODE_AMOUNT: u64 = 10000000000000;
+
+pub const HOLDER_MINT: Pubkey = pubkey!("HbebLQBTUiquq6UpGutJo3Fq5Logqf7Ww6tgCBkxLgi9");
