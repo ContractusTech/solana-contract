@@ -58,7 +58,7 @@ pub struct FinishWithBond<'info> {
     pub deposit_executor_bond_account: Box<Account<'info, TokenAccount>>,
     #[account(
         mut,
-        seeds = [&id, b"state".as_ref(), deal_state.client_key.as_ref(), deal_state.executor_key.as_ref()],
+        seeds = [&id, DEAL_STATE_SEED.as_ref(), deal_state.client_key.as_ref(), deal_state.executor_key.as_ref()],
         bump = deal_state.bump,
         constraint = (*initializer.to_account_info().key == deal_state.client_key 
             || cmp_pubkeys(initializer.to_account_info().key, deal_state.checker_key()?)),

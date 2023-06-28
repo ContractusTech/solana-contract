@@ -104,13 +104,11 @@ describe("🤖 Tests Contractus smart-contract", () => {
           executorTokenAccount: executorTokenAccount,
           checkerTokenAccount: checkerTokenAccount,
           mint: mint,
-          authority: vault_authority_pda,
           depositAccount: vault_account_pda,
           dealState: state_account_pda,
           holderDepositAccount: holder_vault_account_pda,
           holderMint: holderMint.publicKey,
           systemProgram: anchor.web3.SystemProgram.programId,
-          rent: anchor.web3.SYSVAR_RENT_PUBKEY,
           tokenProgram: TOKEN_PROGRAM_ID,
   
         })
@@ -315,7 +313,6 @@ describe("🤖 Tests Contractus smart-contract", () => {
           depositAccount: data.vault_account_pda,
           executorTokenAccount: executorTokenAccount,
           holderDepositAccount: data.holder_vault_account_pda,
-          authority: data.vault_authority_pda,
           checkerTokenAccount: checkerTokenAccount,
           dealState: data.state_account_pda,
           tokenProgram: TOKEN_PROGRAM_ID,
@@ -370,7 +367,7 @@ describe("🤖 Tests Contractus smart-contract", () => {
         clientTokenAccount
       )
       assert.ok(depositAccount.amount.toString() == (amount + checkerFee).toString())
-      assert.ok(state.checkerFee.toString() == new anchor.BN(checkerFee).toString())
+      assert.ok(state.type.withChecker.checkerFee.toString() == new anchor.BN(checkerFee).toString())
       assert.ok(state.amount.toNumber().toString() == amount.toString())
       assert.ok(state.clientKey.toBase58() == clientAccount.publicKey.toBase58())
       assert.ok(state.executorKey.toBase58() == executorAccount.publicKey.toBase58())
@@ -380,7 +377,6 @@ describe("🤖 Tests Contractus smart-contract", () => {
         .accounts({
           initializer: checkerAccount.publicKey,
           depositAccount: data.vault_account_pda,
-          authority: data.vault_authority_pda,
           clientTokenAccount: clientTokenAccount,
           dealState: data.state_account_pda,
           tokenProgram: TOKEN_PROGRAM_ID,
@@ -657,7 +653,6 @@ describe("🤖 Tests Contractus smart-contract", () => {
           executorBondAccount: executorBondTokenAccount,
           clientBondMint: clientBondMint,
           executorBondMint: executorBondMint,
-          authority: _vault_authority_pda,
           mint: mint,
           depositAccount: vault_account_pda,
           dealState: state_account_pda,
@@ -666,7 +661,6 @@ describe("🤖 Tests Contractus smart-contract", () => {
           depositClientBondAccount: client_bond_vault_account_pda,
           depositExecutorBondAccount: executor_bond_vault_account_pda,
           systemProgram: anchor.web3.SystemProgram.programId,
-          rent: anchor.web3.SYSVAR_RENT_PUBKEY,
           tokenProgram: TOKEN_PROGRAM_ID,
         })
         .signers([clientAccount, executorAccount, payer])
@@ -965,7 +959,6 @@ describe("🤖 Tests Contractus smart-contract", () => {
           .accounts({
             initializer: clientAccount.publicKey,
             depositAccount: data.vault_account_pda,
-            authority: data.vault_authority_pda,
             clientTokenAccount: clientTokenAccount,
             dealState: data.state_account_pda,
             tokenProgram: TOKEN_PROGRAM_ID,
@@ -985,7 +978,6 @@ describe("🤖 Tests Contractus smart-contract", () => {
             depositExecutorBondAccount: data.executor_bond_vault_account_pda,
             initializer: clientAccount.publicKey,
             depositAccount: data.vault_account_pda,
-            authority: data.vault_authority_pda,
             clientTokenAccount: clientTokenAccount,
             dealState: data.state_account_pda,
             tokenProgram: TOKEN_PROGRAM_ID,
@@ -1100,7 +1092,6 @@ describe("🤖 Tests Contractus smart-contract", () => {
             depositExecutorBondAccount: data.executor_bond_vault_account_pda,
             initializer: clientAccount.publicKey,
             depositAccount: data.vault_account_pda,
-            authority: data.vault_authority_pda,
             clientTokenAccount: clientTokenAccount,
             dealState: data.state_account_pda,
             tokenProgram: TOKEN_PROGRAM_ID,
