@@ -1,0 +1,13 @@
+{
+  "pubkey": "9479m8V6EuvFKPC812s8BZ3g3hD5Ru63hkR23Y7DLvEs",
+  "account": {
+    "lamports": 3507840,
+    "data": [
+      "AQAAAP//////////BAAAAAAAAAAAARyxvIzR/85B2cdVkFHsssSszcC4gElAyqmEhXk3LHxXAADjlFk9kTaOIstJabg4si8fT5kO1heoThzDujZAT/B+/0s6AaHBl3vH+9pt079m7zExQOokrEiSgHeOWpF/eWwkSqXlHjOvHGKsHVxcxGAjsNRg9KqSgTwxo+4blcv2lrylcRR2jAfhttod4Ky011Oc7N2YzvZJ8yEyxneBIi0pV3T3+wwfCE6RX8ZrofzLOjvEu/H930WDNHCPxaOrSDbWAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAG3fbh12Whk9nL4UbO63msHLSF7V9bN5E6jPWFfv8AqYyXJY9OJInxuz0QKRSODYMLWhOZ2v8QhASOe9jb6fhZIXtYltGP7rI/OEqHlaclhdVbZBqGdNg+oSfXL5Oc6y444Yyv6c5YG/n4Jq1XYGXCzYMIQChIJBgSOfK6Xy359Q==",
+      "base64"
+    ],
+    "owner": "AddressLookupTab1e1111111111111111111111111",
+    "executable": false,
+    "rentEpoch": 0
+  }
+}

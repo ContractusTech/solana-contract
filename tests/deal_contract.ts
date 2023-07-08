@@ -1,419 +1,480 @@
-import * as anchor from "@project-serum/anchor";
-import { Program, AnchorProvider } from "@project-serum/anchor";
-import { PublicKey, Keypair, SystemProgram, Transaction, Commitment } from '@solana/web3.js';
-import { TOKEN_PROGRAM_ID, createMint, createAccount, mintTo, getAccount } from "@solana/spl-token";
-import { DealContract } from "../target/types/deal_contract";
+import * as anchor from "@coral-xyz/anchor";
+import { Program, AnchorProvider, IdlTypes, BN } from "@coral-xyz/anchor";
+import { PublicKey, Keypair, Signer, SystemProgram, Transaction, Commitment, AddressLookupTableAccount, AddressLookupTableProgram, VersionedTransaction, VersionedMessage } from '@solana/web3.js';
+import { TOKEN_PROGRAM_ID, createMint, createAccount, mintTo, getAccount, DEFAULT_ACCOUNT_STATE_SIZE, getAssociatedTokenAddressSync } from "@solana/spl-token";
+import { DealContract, IDL as DC_IDL } from "../target/types/deal_contract";
 import { assert } from "chai";
 import { v4 as uuid } from 'uuid'
-import * as fs from 'fs';
+import { DEAL_CONTRACT_PROGRAM_ID, getCancelIx, getDealStatePk, getFinishIx, getInitializeIx, getTotalComputeIxs, HOLDER_MINT, SERVICE_FEE_MINT, SERVICE_FEE_MINT_KP, SERVICE_FEE_OWNER, SERVICE_FEE_TA, signAndSendIxs as signAndSendIxs, uuidTodealIdBuf } from "./client";
+import NodeWallet from "@coral-xyz/anchor/dist/cjs/nodewallet";
+import { ASSOCIATED_PROGRAM_ID } from "@coral-xyz/anchor/dist/cjs/utils/token";
+import './keys';
+import { checkerKp, clientKp, executorKp, holderMintKp, mintAuthorityKp, payerKp, serviceFeeMintKp, serviceKp } from "./keys";
+import { seed } from "@coral-xyz/anchor/dist/cjs/idl";
+
+const ADDRESS_LOOKUP_TABLE_ADDRESS: PublicKey = new PublicKey("9479m8V6EuvFKPC812s8BZ3g3hD5Ru63hkR23Y7DLvEs");
+let ADDRESS_LOOKUP_TABLE_ACCOUNT: AddressLookupTableAccount | undefined = undefined;
+async function getAddressLookupTable(pubkey?: PublicKey) {
+  if (ADDRESS_LOOKUP_TABLE_ACCOUNT === undefined) {
+    if (!pubkey) { throw new Error("addressLookupTable pubkey hasn't been passed")}
+    const alt = await conn.getAddressLookupTable(pubkey);
+    if (!alt.value) { throw new Error("addressLookupTable hasn't been properly created")}
+    console.log(`ALT: ${pubkey.toString()}`);
+    ADDRESS_LOOKUP_TABLE_ACCOUNT = alt.value as AddressLookupTableAccount
+  } 
+  return ADDRESS_LOOKUP_TABLE_ACCOUNT as AddressLookupTableAccount
+}
+
+console.log(`
+payerKp: ${payerKp.publicKey.toString()}    
+clientKp: ${clientKp.publicKey.toString()}    
+executorKp: ${executorKp.publicKey.toString()}    
+checkerKp: ${checkerKp.publicKey.toString()}    
+mintAuthorityKp: ${mintAuthorityKp.publicKey.toString()}    
+serviceKp: ${serviceKp.publicKey.toString()}    
+serviceFeeMintKp: ${serviceFeeMintKp.publicKey.toString()}    
+holderMintKp: ${holderMintKp.publicKey.toString()}    
+`)
+
+const COMMITMENT = 'confirmed'
+
+const PROGRAM_ID = new PublicKey("GKNkN4uDJWmidEC9h5Q9GQXNg48Go6q5bdnkDj6bSopz")
+
+const conn = new anchor.web3.Connection("http://0.0.0.0:8899", {commitment: COMMITMENT});
+const wallet = NodeWallet.local();
+
+const confirmOptions = {commitment: COMMITMENT as Commitment, skipPreflight: true};
+
+const provider = new anchor.AnchorProvider(conn, wallet, { commitment: COMMITMENT, skipPreflight: true });
+  // console.log(`provider: ${JSON.stringify(provider)}`)
+anchor.setProvider(provider)
+const program = new Program( DC_IDL as anchor.Idl, PROGRAM_ID, provider) as Program<DealContract>;
+
 
 describe("🤖 Tests Contractus smart-contract", () => {
-  const commitment: Commitment = 'processed';
-  const options = AnchorProvider.defaultOptions();
-  const program = anchor.workspace.DealContract as Program<DealContract>;
-  const provider = anchor.AnchorProvider.env()
-  anchor.setProvider(provider)
+  let addressLookupTablePk: PublicKey;
+  it("create addressLookupTable", async()=>{
+    const alt = await conn.getAccountInfo(new PublicKey(ADDRESS_LOOKUP_TABLE_ADDRESS));
+    if (alt.data.length > 0) { 
+      getAddressLookupTable(ADDRESS_LOOKUP_TABLE_ADDRESS); 
+      return 
+    }
+    
+    const [ix, pk] = AddressLookupTableProgram.createLookupTable({
+      authority: payerKp.publicKey, 
+      payer: payerKp.publicKey, 
+      recentSlot: (await conn.getSlot())
+    });
+
+    addressLookupTablePk = pk;
+
+    const tx = new Transaction();
+    tx.add(ix);
+    tx.recentBlockhash = (await conn.getLatestBlockhash()).blockhash;
+    tx.feePayer = payerKp.publicKey;
+    tx.sign(payerKp);
+    const createTxSig = await conn.sendTransaction(tx, [payerKp], {skipPreflight: true})
+    await conn.confirmTransaction(createTxSig, COMMITMENT);
+  })
+
+  it("extendLookupTable", async() => {
+    if (!addressLookupTablePk) { addressLookupTablePk = ADDRESS_LOOKUP_TABLE_ADDRESS; return }
+    const extendInstruction = AddressLookupTableProgram.extendLookupTable({
+      payer: payerKp.publicKey,
+      authority: payerKp.publicKey,
+      lookupTable: addressLookupTablePk,
+      addresses: [
+        DEAL_CONTRACT_PROGRAM_ID,
+        HOLDER_MINT,
+        SERVICE_FEE_MINT,
+        SERVICE_FEE_OWNER,
+        SERVICE_FEE_TA,
+        SystemProgram.programId,
+        TOKEN_PROGRAM_ID,
+        ASSOCIATED_PROGRAM_ID,
+        clientKp.publicKey,
+        executorKp.publicKey,
+      ],
+    });
+
+    const tx = new Transaction();
+    tx.add(extendInstruction);
+    tx.recentBlockhash = (await provider.connection.getLatestBlockhash()).blockhash;
+    tx.feePayer = payerKp.publicKey;
+    tx.sign(payerKp);
+    console.log("We have to wait until extendLookupTable transaction is finalized...");
+    const extendTxSig = await conn.sendTransaction(tx, [payerKp], {skipPreflight: true})
+    await conn.confirmTransaction(extendTxSig, "finalized");
+
+    await getAddressLookupTable(addressLookupTablePk);
+  })
+
+  
+  it("transfer SOL from payer to another accounts", async()=>{
+    await provider.sendAndConfirm((() => {
+      const tx = new Transaction();
+      tx.add(SystemProgram.transfer({fromPubkey: payerKp.publicKey,toPubkey: clientKp.publicKey,lamports: 1000000000,}));
+      tx.add(SystemProgram.transfer({fromPubkey: payerKp.publicKey,toPubkey: executorKp.publicKey,lamports: 1000000000,}));
+      tx.add(SystemProgram.transfer({fromPubkey: payerKp.publicKey,toPubkey: mintAuthorityKp.publicKey,lamports: 1000000000,}));
+      tx.add(SystemProgram.transfer({fromPubkey: payerKp.publicKey,toPubkey: serviceKp.publicKey,lamports: 1000000000,}));
+      tx.add(SystemProgram.transfer({fromPubkey: payerKp.publicKey,toPubkey: checkerKp.publicKey,lamports: 1000000000,}));
+      return tx;
+    })(), [payerKp])
+  })
+  
+  it("create serviceFee token", async() => {
+    await createMint(
+      provider.connection,
+      payerKp,
+      mintAuthorityKp.publicKey,
+      null,
+      0,
+      serviceFeeMintKp,
+      {commitment: COMMITMENT}
+    );
+    await createAccount(provider.connection, payerKp, serviceFeeMintKp.publicKey, serviceKp.publicKey, null, confirmOptions, TOKEN_PROGRAM_ID);
+  }) 
+
+  it("create `holder` token", async() => {
+    await createMint(
+      provider.connection,
+      payerKp,
+      mintAuthorityKp.publicKey,
+      null,
+      0,
+      holderMintKp,
+      {commitment: COMMITMENT}
+    );
+  })
   
   describe("👽️ Deals with third party checker (no performance bond)", ()=> {
-    const clientTokenBalance = 10000;
+    const clientDealTokenBalance = 10000;
     const otherTokenBalance = 500;
-    const serviceFeeTokenBalance = 0;
 
-    const dealAccount = anchor.web3.Keypair.generate();
-    const payer = anchor.web3.Keypair.generate();
-    const mintAuthority = anchor.web3.Keypair.generate();
+    let dealMint: PublicKey;
 
-    const clientAccount = anchor.web3.Keypair.generate();
-    const executorAccount = anchor.web3.Keypair.generate();
-    const checkerAccount = anchor.web3.Keypair.generate();
-    const serviceFeeAccount = anchor.web3.Keypair.generate();
-    const mintServiceAuthority = anchor.web3.Keypair.generate();
-    const mintServiceKeypair: Keypair = (() => {
-      let secret: Uint8Array = JSON.parse(fs.readFileSync(process.env.MINT_KEY_PATH, 'utf-8'))
-      return Keypair.fromSecretKey(new Uint8Array(secret))
-    })()
+    let clientDealTa: PublicKey;
+    let clientHolderTa: PublicKey;
+    let executorDealTa: PublicKey;
 
-    var mint;
-
-    var clientTokenAccount;
-    var executorTokenAccount;
-    var checkerTokenAccount;
-    var serviceFeeTokenAccount;
-
-    var mintService;
-    var clientServiceTokenAccount;
-    var serviceFeeServiceTokenAccount;
-
-    const _createDeal = async (
-      dealId,
-      amount,
-      checkerFee,
-      serviceFee,
-      clientAccount,
-      executorAccount,
-      checkerAccount,
-      payer,
-      serviceFeeTokenAccount,
-      clientTokenAccount,
-      clientServiceTokenAccount,
-      executorTokenAccount,
-      checkerTokenAccount,
-      mint,
-      holderMint,
-      holderMode
-    ) => {
-      const seed = Buffer.from(anchor.utils.bytes.utf8.encode(dealId)).subarray(0, 32)
-  
-      const [_vault_account_pda, _vault_account_bump] = await PublicKey.findProgramAddress(
-        [seed, Buffer.from(anchor.utils.bytes.utf8.encode("deposit")), clientAccount.publicKey.toBuffer(),  executorAccount.publicKey.toBuffer()],
-       
-        program.programId
-      );
-      const [holder_vault_account_pda, _holder_vault_account_bump] = await PublicKey.findProgramAddress(
-        [seed, Buffer.from(anchor.utils.bytes.utf8.encode("holder_deposit")), clientAccount.publicKey.toBuffer(),  executorAccount.publicKey.toBuffer()],
-        program.programId
-      );
-      var vault_account_pda = _vault_account_pda;
-      var vault_account_bump = _vault_account_bump;
-  
-      const [vault_authority_pda, _vault_authority_bump] = await PublicKey.findProgramAddress(
-        [seed, Buffer.from(anchor.utils.bytes.utf8.encode("auth")), clientAccount.publicKey.toBuffer(),  executorAccount.publicKey.toBuffer()],
-        program.programId
-      );
-  
-      const [state_account_pda, _state_account_bump] = await PublicKey.findProgramAddress(
-        [seed, Buffer.from(anchor.utils.bytes.utf8.encode("state")), clientAccount.publicKey.toBuffer(),  executorAccount.publicKey.toBuffer()],
-        program.programId
-      );
-  
-      await program.methods.initializeWithChecker(
-        seed,
-        new anchor.BN(amount),
-        new anchor.BN(serviceFee),
-        new anchor.BN(checkerFee),
-        holderMode
-      )
-        .accounts({
-          client: clientAccount.publicKey,
-          executor: executorAccount.publicKey,
-          checker: checkerAccount.publicKey,
-          payer: payer.publicKey,
-          serviceFeeAccount: serviceFeeTokenAccount,
-          clientTokenAccount: clientTokenAccount,
-          clientServiceTokenAccount: clientServiceTokenAccount,
-          executorTokenAccount: executorTokenAccount,
-          checkerTokenAccount: checkerTokenAccount,
-          mint: mint,
-          authority: vault_authority_pda,
-          depositAccount: vault_account_pda,
-          dealState: state_account_pda,
-          holderDepositAccount: holder_vault_account_pda,
-          holderMint: holderMint.publicKey,
-          systemProgram: anchor.web3.SystemProgram.programId,
-          rent: anchor.web3.SYSVAR_RENT_PUBKEY,
-          tokenProgram: TOKEN_PROGRAM_ID,
-  
-        })
-        .signers([clientAccount, executorAccount, checkerAccount, payer])
-        .rpc()
-  
-      return {
-        vault_account_pda,
-        state_account_pda,
-        vault_account_bump,
-        vault_authority_pda,
-        seed,
-        holder_vault_account_pda
-      }
-    }
-
-    const createDeal = async (dealId, amount, checkerFee, serviceFee, holderMode) => {
-      return await _createDeal(
+    const createDeal = async ({dealId, amount, serviceFee, withChecker, clientBond, executorBond, 
+      holderMode, signers, executor, client}: {
+      dealId: string | Buffer,
+      amount: number,
+      serviceFee: {
+          amount: number,
+          mint?: PublicKey
+      },
+      signers: Signer[],
+      deadline?: number,
+      withChecker?: {
+        checkerFee: BN | number,
+        checkerKey: PublicKey
+      },
+      clientBond?: IdlTypes<DealContract>["Bond"],
+      executorBond?: IdlTypes<DealContract>["Bond"],
+      holderMode?: boolean,
+      executor?: PublicKey,
+      client?: PublicKey,
+    }) => {
+       const instruction = (await getInitializeIx({
+        dealContractProgram: program,
         dealId,
         amount,
-        checkerFee,
         serviceFee,
-        clientAccount,
-        executorAccount,
-        checkerAccount,
-        payer,
-        serviceFeeTokenAccount,
-        clientTokenAccount,
-        clientServiceTokenAccount,
-        executorTokenAccount,
-        checkerTokenAccount,
-        mint, 
-        mintServiceKeypair,
-        holderMode)
-    }
+        clientPk: client ? client : clientKp.publicKey,
+        executorPk: executor ? executor : executorKp.publicKey,
+        payerPk: payerKp.publicKey,
+        dealMint,
+        holderMode: !!holderMode ? holderMode : false,
+        withChecker: !!withChecker ? {
+          checkerKey: withChecker.checkerKey,
+          checkerFee: new BN(withChecker.checkerFee)
+        } : undefined,
+        clientBond,
+        executorBond      
+      })).instruction();
+      return await signAndSendIxs(conn, [getTotalComputeIxs(400000)[0], await instruction], signers, payerKp, [await getAddressLookupTable()])
+    };
 
+    let clientServiceFeeTa: PublicKey;
+    let serviceServiceFeeTa: PublicKey;
+    
     before( async()=>{
-      await provider.connection.confirmTransaction(
-        await provider.connection.requestAirdrop(payer.publicKey, 2000000000),
-        "processed"
+      dealMint = await createMint(
+        provider.connection,
+        payerKp,
+        mintAuthorityKp.publicKey,
+        null,
+        0,
+        Keypair.generate(),
+        {commitment: COMMITMENT}
       );
-  
-      await provider.sendAndConfirm((() => {
-        const tx = new Transaction();
-        tx.add(
-          SystemProgram.transfer({
-            fromPubkey: payer.publicKey,
-            toPubkey: clientAccount.publicKey,
-            lamports: 100000000,
-          })
-        );
-        return tx;
-      })(), [payer])
-      const accountInfo = await provider.connection.getAccountInfo(
-        clientAccount.publicKey
-      )
-      assert.ok(accountInfo.lamports == 100000000)
-      mint = await createMint(
-        provider.connection,
-        payer,
-        mintAuthority.publicKey,
-        null,
-        0);
+      console.log(`dealMint: ${dealMint.toString()}`);
 
-      mintService = await createMint(
-        provider.connection,
-        payer,
-        mintServiceAuthority.publicKey,
-        null,
-        0, 
-        mintServiceKeypair);
-  
-      clientTokenAccount = await createAccount(provider.connection, payer, mint, clientAccount.publicKey, null, null, TOKEN_PROGRAM_ID);
-      executorTokenAccount = await createAccount(provider.connection, payer, mint, executorAccount.publicKey, null, null, TOKEN_PROGRAM_ID);
-      checkerTokenAccount = await createAccount(provider.connection, payer, mint, checkerAccount.publicKey, null, null, TOKEN_PROGRAM_ID);
-      serviceFeeTokenAccount = await createAccount(provider.connection, payer, mint, serviceFeeAccount.publicKey, null, null, TOKEN_PROGRAM_ID);
-   
-      clientServiceTokenAccount = await createAccount(provider.connection, payer, mintService, clientAccount.publicKey, null, null, TOKEN_PROGRAM_ID);
-      serviceFeeServiceTokenAccount = await createAccount(provider.connection, payer, mintService, serviceFeeAccount.publicKey, null, null, TOKEN_PROGRAM_ID);
-  
-      await mintTo(provider.connection, payer, mint, clientTokenAccount, mintAuthority.publicKey, clientTokenBalance, [mintAuthority])
-      await mintTo(provider.connection, payer, mint, executorTokenAccount, mintAuthority.publicKey, otherTokenBalance, [mintAuthority])
-      await mintTo(provider.connection, payer, mint, checkerTokenAccount, mintAuthority.publicKey, otherTokenBalance, [mintAuthority])
-      await mintTo(provider.connection, payer, mint, serviceFeeTokenAccount, mintAuthority.publicKey, serviceFeeTokenBalance, [mintAuthority])
-  
+      clientDealTa = getAssociatedTokenAddressSync(dealMint, clientKp.publicKey);
+      executorDealTa = getAssociatedTokenAddressSync(dealMint, executorKp.publicKey);
+      clientHolderTa = getAssociatedTokenAddressSync(HOLDER_MINT, clientKp.publicKey);
+ 
+      clientServiceFeeTa = await createAccount(provider.connection, payerKp, serviceFeeMintKp.publicKey, clientKp.publicKey, undefined, confirmOptions, TOKEN_PROGRAM_ID);
+      clientDealTa = await createAccount(provider.connection, payerKp, dealMint, clientKp.publicKey, undefined, confirmOptions, TOKEN_PROGRAM_ID);
+      clientHolderTa = await createAccount(provider.connection, payerKp, HOLDER_MINT, clientKp.publicKey, undefined, confirmOptions, TOKEN_PROGRAM_ID);
+
+      const mintDeal = mintTo(provider.connection, mintAuthorityKp, dealMint, clientDealTa, mintAuthorityKp.publicKey, clientDealTokenBalance, undefined, confirmOptions, TOKEN_PROGRAM_ID);
+      const mintHolder = mintTo(provider.connection, mintAuthorityKp, HOLDER_MINT, clientHolderTa, mintAuthorityKp.publicKey, 1000000000, undefined, confirmOptions, TOKEN_PROGRAM_ID);
+      await Promise.all([mintDeal, mintHolder]);
     })
 
     it("Validating state", async () => {
-
-      const clientTokenAccountInfo = await getAccount(
-        provider.connection,
-        clientTokenAccount
-      )
-      const executorTokenAccountInfo = await getAccount(
-        provider.connection,
-        executorTokenAccount
-      )
-      const checkerTokenAccountInfo = await getAccount(
-        provider.connection,
-        checkerTokenAccount
-      )
-  
-      assert.ok(clientTokenAccountInfo.mint.toBase58() == mint.toBase58())
-      assert.ok(clientTokenAccountInfo.amount.toString() == clientTokenBalance.toString())
-      assert.ok(executorTokenAccountInfo.amount.toString() == otherTokenBalance.toString())
-      assert.ok(checkerTokenAccountInfo.amount.toString() == otherTokenBalance.toString())
+      getAccount(provider.connection,clientDealTa).then(r=>{
+        assert.ok(r.mint.toBase58() === dealMint.toBase58(), "invalid client dealMint")
+        assert.ok(r.amount.toString() == clientDealTokenBalance.toString(), "invalid client dealAmount")
+      });
+      getAccount(provider.connection,clientHolderTa).then(r=>{
+        assert.ok(r.mint.toBase58() === HOLDER_MINT.toBase58(), "invalid client clientHolderTa.mint")
+        assert.ok(r.amount.toString() != "0", "invalid client clientHolderTa.amount")
+      });
     });
 
     it("Create deal", async () => {
-
-      const dealId = uuid()
-      const fee = 100
+      const dealId = uuidTodealIdBuf(uuid())
+      const checkerFee = 100
       const amount = 1000
       const serviceFee = 50
-      let data = await createDeal(dealId, amount, fee, serviceFee, false)
+
+      const clientDealTaData = await conn.getTokenAccountBalance(clientDealTa, COMMITMENT);
+      const clientHolderTaData = await conn.getTokenAccountBalance(clientHolderTa, COMMITMENT);
+
+      await createDeal({
+        dealId, 
+        amount, 
+        serviceFee: {
+          amount: serviceFee,
+          mint: dealMint
+        }, 
+        holderMode: false,
+        withChecker: {
+          checkerFee: new BN(checkerFee),
+          checkerKey: checkerKp.publicKey
+        }, 
+        signers: [clientKp, executorKp, checkerKp, payerKp]
+      });
      
-      const state = await program.account.dealState.fetch(data.state_account_pda)
-  
-      const serviceFeeTokenAccountInfo = await getAccount(
-        provider.connection,
-        serviceFeeTokenAccount
-      )
-  
-      const depositInfo = await getAccount(
-        provider.connection,
-        data.vault_account_pda
-      )
-  
-      assert.ok(serviceFeeTokenAccountInfo.amount.toString() == serviceFee.toString())
-      assert.ok(state.amount.toNumber().toString() == amount.toString())
-      assert.ok(state.clientKey.toBase58() == clientAccount.publicKey.toBase58())
-      assert.ok(state.executorKey.toBase58() == executorAccount.publicKey.toBase58())
+      const dealStatePk = getDealStatePk(dealId, clientKp.publicKey, executorKp.publicKey)[0];
+      const dealStateDealTa = getAssociatedTokenAddressSync(dealMint, dealStatePk, true);
+      const dealStateDealTaInfo = await getAccount(provider.connection, dealStateDealTa );
+
+      serviceServiceFeeTa = getAssociatedTokenAddressSync(dealMint, SERVICE_FEE_OWNER);
+
+      const dealStateData = await program.account.dealState.fetch(dealStatePk, "processed");
+      const serviceFeeTaInfo = await getAccount(provider.connection, serviceServiceFeeTa );
+    
+      assert.ok(serviceFeeTaInfo.amount.toString() == serviceFee.toString(), 
+        `invalid serviceFee: expected ${serviceFee.toString()}. got ${serviceFeeTaInfo.amount.toString()}`)
+      assert.ok(dealStateData.amount.toString() == amount.toString(), 
+        `invalid dealStateData.amount: expected ${amount.toString()}. got ${dealStateData.amount.toString()}`)
+      assert.ok(dealStateData.clientKey.toString() == clientKp.publicKey.toString(),
+        `dealStateData.clientkey: expected: ${clientKp.publicKey}. got ${dealStateData.clientKey.toString()}`)
+      assert.ok(dealStateData.executorKey.toString() == executorKp.publicKey.toString(),
+        `dealStateData.executorkey: expected: ${executorKp.publicKey}. got ${dealStateData.executorKey.toString()}`)
+      assert.ok(dealStateDealTaInfo.amount.toString() == (amount + checkerFee).toString(),
+        `dealStateDealTaInfo.amount: expected ${(amount + checkerFee).toString()}. got ${dealStateDealTaInfo.amount.toString()}`)
     });
 
     it("Try recreate deal with same ID", async () => {
-
-
-      var serviceFeeTokenAccountInfo = await getAccount(
-        provider.connection,
-        serviceFeeTokenAccount
-      )
-      const amountBefore = serviceFeeTokenAccountInfo.amount
-      const dealId = uuid()
-      const fee = 100
+      const dealId = uuidTodealIdBuf(uuid())
       const amount = 1000
       const serviceFee = 50
-      let data = await createDeal(dealId, amount, fee, serviceFee, false)
+
+      serviceServiceFeeTa = getAssociatedTokenAddressSync(dealMint, SERVICE_FEE_OWNER);
+
+      let serviceFeeAmountBefore;
+      serviceFeeAmountBefore = (await getAccount(provider.connection, serviceServiceFeeTa, "processed")).amount
+
+      const sig = await createDeal({
+        dealId, 
+        amount, 
+        serviceFee: {
+          amount: serviceFee,
+          mint: dealMint
+        }, 
+        signers: [clientKp, executorKp, payerKp]
+      });
      
-      const state = await program.account.dealState.fetch(data.state_account_pda)
+
+      const dealStatePk = getDealStatePk(dealId, clientKp.publicKey, executorKp.publicKey)[0];
+      const dealStateDealTa = getAssociatedTokenAddressSync(dealMint, dealStatePk, true);
+      const dealStateDealTaInfo = await getAccount(provider.connection, dealStateDealTa );
+      const dealStateData = await program.account.dealState.fetch(dealStatePk, "processed");
   
-      serviceFeeTokenAccountInfo = await getAccount(
-        provider.connection,
-        serviceFeeTokenAccount
-      )
-  
-      const depositInfo = await getAccount(
-        provider.connection,
-        data.vault_account_pda
-      )
-  
-      assert.ok(serviceFeeTokenAccountInfo.amount.toString() == (amountBefore + BigInt(serviceFee)).toString())
-      assert.ok(state.amount.toNumber().toString() == amount.toString())
-      assert.ok(state.clientKey.toBase58() == clientAccount.publicKey.toBase58())
-      assert.ok(state.executorKey.toBase58() == executorAccount.publicKey.toBase58())
+      const serviceFeeAmountAfter = (await getAccount(provider.connection, serviceServiceFeeTa, "processed" )).amount
+      const serviceFeePaid = serviceFeeAmountAfter - serviceFeeAmountBefore;
+    
+      try {
+        assert.ok(serviceFeePaid.toString() == serviceFee.toString(), `invalid serviceFeePaid` );
+        assert.ok(dealStateData.amount.toString() == amount.toString(), 
+          `invalid dealStateData.amount: expected ${amount.toString()}. got ${dealStateData.amount.toString()}`)
+        assert.ok(dealStateData.clientKey.toString() == clientKp.publicKey.toString(),
+          `dealStateData.clientkey: expected: ${clientKp.publicKey}. got ${dealStateData.clientKey.toString()}`)
+        assert.ok(dealStateData.executorKey.toString() == executorKp.publicKey.toString(),
+          `dealStateData.executorkey: expected: ${executorKp.publicKey}. got ${dealStateData.executorKey.toString()}`)
+        assert.ok(dealStateDealTaInfo.amount.toString() == amount .toString(),
+          `dealStateDealTaInfo.amount: expected ${amount.toString()}. got ${dealStateDealTaInfo.amount.toString()}`)
+      } catch (e) {
+        console.log(`failed assertion tx signature: ${sig}`);
+        throw e
+      }
   
       // Try call Init again
       try {
-        let _ = await createDeal(dealId, amount, fee, serviceFee, false)
+        await createDeal({
+          dealId, 
+          amount, 
+          serviceFee: {
+            amount: serviceFee,
+            mint: dealMint
+          }, 
+          signers: [clientKp, executorKp, payerKp]
+        });
         assert.ok(false)
       } catch {
         assert.ok(true)
       }
     });
 
-    it("Create deal and finish", async () => {
-
-      const dealId = uuid()
-      const fee = 100
-      const amount = 1000
-      const serviceFee = 50
-      let data = await createDeal(dealId, amount, fee, serviceFee, false)
-  
-      const state = await program.account.dealState.fetch(data.state_account_pda)
-  
-      const depositAccount = await getAccount(
-        provider.connection,
-        state.depositKey
-      )
-
-      assert.ok(Number(depositAccount.amount) == Number(amount + fee))
-
-      const clientTokenAccountInfoBefore = await getAccount(
-        provider.connection,
-        clientTokenAccount
-      )
-
-      try {
-        await program.methods
-        .finish(data.seed)
-        .accounts({
-          initializer: checkerAccount.publicKey,
-          depositAccount: data.vault_account_pda,
-          executorTokenAccount: executorTokenAccount,
-          holderDepositAccount: data.holder_vault_account_pda,
-          authority: data.vault_authority_pda,
-          checkerTokenAccount: checkerTokenAccount,
-          dealState: data.state_account_pda,
-          tokenProgram: TOKEN_PROGRAM_ID,
-        })
-        .signers([checkerAccount])
-        .rpc()
-      } catch(error) {
-        console.log(error)
-        assert.ok(false)
-      }
-      
-  
-      const clientTokenAccountInfo = await getAccount(
-        provider.connection,
-        clientTokenAccount
-      )
-  
-      const executorTokenAccountInfo = await getAccount(
-        provider.connection,
-        executorTokenAccount
-      )
-  
-      const checkerTokenAccountInfo = await getAccount(
-        provider.connection,
-        checkerTokenAccount
-      )
-  
-      assert.ok(clientTokenAccountInfoBefore.amount.toString() == clientTokenAccountInfo.amount.toString())
-      assert.ok(executorTokenAccountInfo.amount.toString() == (Number(otherTokenBalance) + amount).toString())
-      assert.ok(checkerTokenAccountInfo.amount.toString() == (Number(otherTokenBalance) + fee).toString())
-  
-    });
-
-    it("Create deal and cancel", async () => {
-
-      const dealId = uuid()
+    it("Create deal and finish with checker", async () => {
+      const dealId = uuidTodealIdBuf(uuid())
       const checkerFee = 100
       const amount = 1000
       const serviceFee = 50
-      let data = await createDeal(dealId, amount, checkerFee, serviceFee, false)
+
+      const clientDealTaInfoBefore = (await getAccount(provider.connection, clientDealTa, "processed" ));
+      const executorDealTaInfoBefore = (await getAccount(provider.connection, executorDealTa, "processed" ));
+      const checkerDealTaAmountBefore = (await getAccount(provider.connection, executorDealTa, "processed" )).amount | BigInt(0);
+
+      await createDeal({
+        dealId, 
+        amount, 
+        serviceFee: {
+          amount: serviceFee,
+          mint: dealMint
+        }, 
+        signers: [clientKp, executorKp, checkerKp, payerKp],
+        withChecker: {
+          checkerKey: checkerKp.publicKey,
+          checkerFee: new BN(checkerFee)
+        }
+      });
+  
+      const dealStatePk = getDealStatePk(dealId, clientKp.publicKey, executorKp.publicKey)[0];
+      const dealStateDealTa = getAssociatedTokenAddressSync(dealMint, dealStatePk, true);
+      const dealStateDealTaInfoBefore = await getAccount(provider.connection, dealStateDealTa, "processed" );
+      assert.ok(Number(dealStateDealTaInfoBefore.amount) == amount + checkerFee, 
+        `invalid dealStateDealTaInfoBefore.amount. expected ${amount + checkerFee} got ${dealStateDealTaInfoBefore.amount}`)
+
+      const dealStateHolderTa = getAssociatedTokenAddressSync(HOLDER_MINT, dealStatePk, true);
+
+      const checkerDealTa = getAssociatedTokenAddressSync(dealMint, checkerKp.publicKey);
+      
+      const instruction = (await getFinishIx({          
+        initializer: checkerKp.publicKey,
+        dealMint,
+        clientPk: clientKp.publicKey,
+        dealContractProgram: program,
+        dealId,
+        executorPk: executorKp.publicKey,
+        checkerKey: checkerKp.publicKey,
+      })).instruction()
+      await signAndSendIxs(conn, [await instruction], [checkerKp], checkerKp, [await getAddressLookupTable()])
+
+      const dealStateDealTaInfoAfter = await conn.getAccountInfo(dealStateDealTa, "processed" );
+      assert.ok(dealStateDealTaInfoAfter == null, `dealStateDealTaInfoAfter hadn't been closed`)
+
+      const clientDealTaInfo = await getAccount(provider.connection, clientDealTa, "processed" )
+      assert.ok((Number(clientDealTaInfoBefore.amount) - checkerFee - serviceFee - amount).toString() == clientDealTaInfo.amount.toString(),
+        `invalid clientDealTaInfo.amount. expected ${(Number(clientDealTaInfoBefore.amount) - checkerFee - serviceFee - amount)} got ${clientDealTaInfo.amount}`)
+
+      const executorDealTaInfoAfter = await getAccount(provider.connection, executorDealTa, "processed" );
+      assert.ok(executorDealTaInfoAfter.amount.toString() == (Number(executorDealTaInfoBefore.amount) + amount).toString(),
+        `invalid executorDealTaInfo.amount. expected ${Number(executorDealTaInfoBefore.amount) + amount} got ${executorDealTaInfoAfter.amount}`)
+
+      const checkerDealTaInfo = await getAccount(provider.connection, checkerDealTa, "processed" );
+      assert.ok(checkerDealTaInfo.amount.toString() == (Number(checkerDealTaAmountBefore) + checkerFee).toString(),
+        `invalid checkerDealTaInfo.amount. expected ${Number(checkerDealTaAmountBefore) + checkerFee} got ${checkerDealTaInfo.amount}`)
+    });
+
+    it("Create deal and cancel as checker", async () => {
+      const dealId = uuidTodealIdBuf(uuid())
+      const checkerFee = 100
+      const amount = 1000
+      const serviceFee = 50
+
+      await createDeal({
+        dealId, 
+        amount, 
+        serviceFee: {
+          amount: serviceFee,
+          mint: dealMint
+        }, 
+        signers: [clientKp, executorKp, checkerKp, payerKp],
+        withChecker: {
+          checkerKey: checkerKp.publicKey,
+          checkerFee: new BN(checkerFee)
+        },
+        deadline: 1
+      });
+
+      const dealStatePk = getDealStatePk(dealId, clientKp.publicKey, executorKp.publicKey)[0];
+      const dealStateDealTa = getAssociatedTokenAddressSync(dealMint, dealStatePk, true);
+      const dealStateDealTaInfo = await getAccount(provider.connection, dealStateDealTa );
     
+      const dealStateData = await program.account.dealState.fetch(dealStatePk);
 
-      const state = await program.account.dealState.fetch(data.state_account_pda)
+      const dealStateDealTaData = await getAccount(provider.connection, dealStateDealTa, "processed");
 
-      const depositAccount = await getAccount(
-        provider.connection,
-        state.depositKey
-      )
+      const clientDealTaInfoBefore = await getAccount(provider.connection, clientDealTa, "processed" );
+      
+      assert.ok(dealStateDealTaData.amount.toString() == (amount + checkerFee).toString(),
+        `invalid dealStateDealTaData.amount. expected ${amount + checkerFee} got ${dealStateDealTaData.amount}`)
+      assert.ok(dealStateData.checker.checkerFee.toString() == new anchor.BN(checkerFee).toString(),
+        `invalid dealStateData.checker.checkerFee. expected ${checkerFee} got ${dealStateData.checker.checkerFee}`)
+      assert.ok(dealStateData.amount.toNumber().toString() == amount.toString(),
+        `invalid dealStateData.amount. expected ${amount} got ${dealStateData.amount}`)
+      assert.ok(dealStateData.clientKey.toBase58() == clientKp.publicKey.toBase58(),
+        `invalid dealStateData.clientKey. expected ${clientKp.publicKey} got ${dealStateData.clientKey}`)
+      assert.ok(dealStateData.executorKey.toBase58() == executorKp.publicKey.toBase58(),
+        `invalid dealStateData.executorKey. expected ${executorKp.publicKey} got ${dealStateData.executorKey}`)
 
-      const clientTokenAccountInfoBefore = await getAccount(
-        provider.connection,
-        clientTokenAccount
-      )
-      assert.ok(depositAccount.amount.toString() == (amount + checkerFee).toString())
-      assert.ok(state.checkerFee.toString() == new anchor.BN(checkerFee).toString())
-      assert.ok(state.amount.toNumber().toString() == amount.toString())
-      assert.ok(state.clientKey.toBase58() == clientAccount.publicKey.toBase58())
-      assert.ok(state.executorKey.toBase58() == executorAccount.publicKey.toBase58())
-
-      await program.methods
-        .cancel(data.seed)
-        .accounts({
-          initializer: checkerAccount.publicKey,
-          depositAccount: data.vault_account_pda,
-          authority: data.vault_authority_pda,
-          clientTokenAccount: clientTokenAccount,
-          dealState: data.state_account_pda,
-          tokenProgram: TOKEN_PROGRAM_ID,
-        })
-        .signers([checkerAccount])
-        .rpc()
-
-      const clientTokenAccountInfo = await getAccount(
-        provider.connection,
-        clientTokenAccount
-      )
-      assert.ok((Number(clientTokenAccountInfoBefore.amount) + Number(amount + checkerFee)).toString() == clientTokenAccountInfo.amount.toString())
+      const instruction = (await getCancelIx({
+          initializer: checkerKp.publicKey,
+          dealMint,
+          clientPk: clientKp.publicKey,
+          dealContractProgram: program,
+          dealId,
+          executorPk: executorKp.publicKey,
+          checkerKey: checkerKp.publicKey,
+      })).instruction();
+      await signAndSendIxs(conn, [await instruction], [checkerKp], checkerKp, [await getAddressLookupTable()])
+      
+      const clientDealTaInfo = await getAccount(provider.connection, clientDealTa, "processed");
+      assert.ok((Number(clientDealTaInfoBefore.amount) + Number(amount + checkerFee)).toString() == clientDealTaInfo.amount.toString(),
+        `invalid clientDealTaInfo.amount. expected ${(Number(clientDealTaInfoBefore.amount) + Number(amount + checkerFee)).toString()} got ${clientDealTaInfo.amount}`)
     });
 
     it("Try create deal with the same executor and client", async () => {
-      var promise = _createDeal(
-        uuid(),
-        1000,
-        0,
-        100,
-        clientAccount,
-        clientAccount,
-        checkerAccount,
-        payer,
-        serviceFeeTokenAccount,
-        clientTokenAccount,
-        clientServiceTokenAccount,
-        clientTokenAccount,
-        checkerTokenAccount,
-        mint, 
-        mintServiceKeypair, 
-        false)
-      promise.then(() => {
+      createDeal(
+      {
+        dealId: uuid(),
+        amount: 1000,
+        serviceFee: {
+          amount: 100,
+          mint: dealMint
+        }, 
+        client: clientKp.publicKey,
+        executor: clientKp.publicKey,
+        holderMode: false,
+        signers: [clientKp]
+      }).then(() => {
         assert.ok(false)
       }).catch((error) => {
         assert.ok(error.error.errorCode.code == "ConstraintRaw")
@@ -421,8 +482,15 @@ describe("🤖 Tests Contractus smart-contract", () => {
     })
 
     it("Try create deal with the zero fee (holder mode off)", async () => {
-      let promise = createDeal(uuid(), 1000, 0, 0, false)
-      promise.then(() => {
+      createDeal({
+        dealId: uuid(), 
+        amount: 1000, 
+        serviceFee: {
+          amount: 0,
+          mint: dealMint
+        }, 
+        signers: [clientKp, executorKp]
+      }).then(() => {
         assert.ok(false)
       }).catch((error) => {
         // TODO: - Add validation by errorCode
@@ -432,78 +500,40 @@ describe("🤖 Tests Contractus smart-contract", () => {
 
     it("Try create deal with the zero fee (holder mode on, but not fund)", async () => {
       try {
-        await _createDeal(
-          uuid(),
-          1000,
-          0,
-          0,
-          clientAccount,
-          executorAccount,
-          checkerAccount,
-          payer,
-          serviceFeeTokenAccount,
-          clientServiceTokenAccount,
-          clientServiceTokenAccount,
-          executorTokenAccount,
-          checkerTokenAccount,
-          mintService,
-          mintServiceKeypair, 
-          true)
+        await createDeal({
+          dealId: uuid(),
+          amount: 1000,
+        serviceFee: {
+          amount: 0,
+          mint: dealMint
+        }, 
+          withChecker: {
+            checkerFee: 0,
+            checkerKey: checkerKp.publicKey
+          },
+          holderMode: true,
+          signers: [clientKp, executorKp, checkerKp]
+        })
+        assert.ok(false)
       } catch(error) {
         // TODO: - Add validation by errorCode
         assert.ok(true)
       }
-    })
-
-    it("Create deal with ivalid client token account", async () => {
-      try {
-        await _createDeal(
-          uuid(),
-          1000,
-          0,
-          0,
-          clientAccount,
-          executorAccount,
-          checkerAccount,
-          payer,
-          serviceFeeTokenAccount,
-          executorTokenAccount, // <- Invalid here
-          clientServiceTokenAccount,
-          executorTokenAccount,
-          checkerTokenAccount,
-          mintService, mintServiceKeypair, 
-          false)
-          assert.ok(false)
-      } catch(error) {
-        // TODO: - Add validation by errorCode
-        assert.ok(true)
-      }
-      
     })
 
     it("Create deal with zero amount, fee and service fee with custom token", async () => {
-
-      let amount = 0
-      
       try {
-        await _createDeal(
-          uuid(),
-          amount,
-          0,
-          0,
-          clientAccount,
-          executorAccount,
-          checkerAccount,
-          payer,
-          serviceFeeTokenAccount,
-          clientTokenAccount,
-          clientServiceTokenAccount,
-          executorTokenAccount,
-          checkerTokenAccount,
-          mintService, 
-          mintServiceKeypair, 
-          false)
-          assert.ok(false)
+        await createDeal({
+          dealId: uuid(),
+          amount: 0,
+        serviceFee: {
+          amount: 0,
+          mint: dealMint
+        }, 
+          signers: [clientKp, executorKp, checkerKp, payerKp],
+          holderMode: false
+        })
+        assert.ok(false)
       } catch(error) {
         // TODO: - Add validation by errorCode
         assert.ok(true)
@@ -511,33 +541,23 @@ describe("🤖 Tests Contractus smart-contract", () => {
     })
 
     it("Create deal with zero service fee with custom token", async () => {
-
-      let amount = 1000
-
       try {
-        await _createDeal(
-          uuid(),
-          amount,
-          0,
-          0,
-          clientAccount,
-          executorAccount,
-          checkerAccount,
-          payer,
-          serviceFeeTokenAccount,
-          clientTokenAccount,
-          clientServiceTokenAccount,
-          executorTokenAccount,
-          checkerTokenAccount,
-          mint, mintServiceKeypair, 
-          false)
-          assert.ok(false)
+        await createDeal({
+          dealId: uuid(),
+          amount: 1000,
+        serviceFee: {
+          amount: 0,
+          mint: dealMint
+        }, 
+          signers: [clientKp, executorKp, checkerKp, payerKp],
+          holderMode: false
+        })
+        assert.ok(false)
       } catch(error) {
         // TODO: - Add validation by errorCode
         assert.ok(true)
       }
     })
-  
   })
 
   describe("👻 Deals with performance bond (no checker)", ()=> {
@@ -548,7 +568,7 @@ describe("🤖 Tests Contractus smart-contract", () => {
     const serviceFeeTokenBalance = 0;
     const bondTokenBalance = 0;
 
-    const dealAccount = anchor.web3.Keypair.generate();
+    // const dealAccount = anchor.web3.Keypair.generate();
     const payer = anchor.web3.Keypair.generate();
     const mintAuthority = anchor.web3.Keypair.generate();
 
@@ -556,27 +576,24 @@ describe("🤖 Tests Contractus smart-contract", () => {
     const executorAccount = anchor.web3.Keypair.generate();
     const checkerAccount = anchor.web3.Keypair.generate();
     const serviceFeeAccount = anchor.web3.Keypair.generate();
-    const mintServiceAuthority = anchor.web3.Keypair.generate();
+    const serviceFeeMintAuthority = anchor.web3.Keypair.generate();
     const bondMintAuthority = anchor.web3.Keypair.generate();
-    const mintServiceKeypair: Keypair = (() => {
-      let secret: Uint8Array = JSON.parse(fs.readFileSync(process.env.MINT_KEY_PATH, 'utf-8'))
-      return Keypair.fromSecretKey(new Uint8Array(secret))
-    })()
+    const serviceFeeMintKeypair: Keypair = serviceFeeMintKp;
 
     var mint;
     var mintBond;
 
-    var clientTokenAccount;
-    var executorTokenAccount;
-    var checkerTokenAccount;
-    var serviceFeeTokenAccount;
+    var clientTa;
+    var executorTa;
+    var checkerTa;
+    var serviceFeeTa;
 
-    var bondClientTokenAccount;
-    var bondExecutorTokenAccount;
+    var bondClientTa;
+    var bondExecutorTa;
 
-    var mintService;
-    var clientServiceTokenAccount;
-    var serviceFeeServiceTokenAccount;
+    var serviceFeeMint;
+    var clientServiceTa;
+    var serviceFeeServiceTa;
 
     const createDeal = async (
       dealId,
@@ -587,100 +604,55 @@ describe("🤖 Tests Contractus smart-contract", () => {
       clientAccount,
       executorAccount,
       payer,
-      serviceFeeTokenAccount,
-      clientTokenAccount,
-      clientServiceTokenAccount,
-      executorTokenAccount,
-      clientBondTokenAccount,
+      serviceFeeTa,
+      clientTa,
+      clientServiceTa,
+      executorTa,
+      clientBondTa,
       clientBondMint,
-      executorBondTokenAccount,
+      executorBondTa,
       executorBondMint,
       mint,
       holderMint,
       holderMode,
       deadline
-      ) => {
-      const seed = Buffer.from(anchor.utils.bytes.utf8.encode(dealId)).subarray(0, 32)
+    ) => {
+      dealId = uuidTodealIdBuf(dealId);
+      
+      (await getInitializeIx({
+        dealContractProgram: program,
+        dealId,
+        amount,
+        serviceFee,
+        clientPk: clientAccount ? clientAccount : clientKp.publicKey,
+        executorPk: executorAccount ? executorAccount : executorKp.publicKey,
+        payerPk: payerKp.publicKey,
+        dealMint: mint,
+        holderMode,
+        clientBond: {
+          mint: clientBondMint,
+          amount: clientBondAmount,
+        },
+        executorBond: {
+          mint: executorBondMint,
+          amount: executorBondAmount
+        }
+      })).preInstructions([getTotalComputeIxs(800000)[0]]).rpc();
 
-      const [_vault_account_pda, _vault_account_bump] = await PublicKey.findProgramAddress(
-        [seed, Buffer.from(anchor.utils.bytes.utf8.encode("deposit")), clientAccount.publicKey.toBuffer(), executorAccount.publicKey.toBuffer()],
-        program.programId
-      );
-      const [_holder_vault_account_pda, _holder_vault_account_bump] = await PublicKey.findProgramAddress(
-        [seed, Buffer.from(anchor.utils.bytes.utf8.encode("holder_deposit")), clientAccount.publicKey.toBuffer(), executorAccount.publicKey.toBuffer()],
-        program.programId
-      );
-      var vault_account_pda = _vault_account_pda;
-      var vault_account_bump = _vault_account_bump;
-
-      const [_vault_authority_pda, _vault_authority_bump] = await PublicKey.findProgramAddress(
-        [seed, Buffer.from(anchor.utils.bytes.utf8.encode("auth")), clientAccount.publicKey.toBuffer(), executorAccount.publicKey.toBuffer()],
-        program.programId
-      );
-
-      const [_state_account_pda, _state_account_bump] = await PublicKey.findProgramAddress(
-        [seed, Buffer.from(anchor.utils.bytes.utf8.encode("state")), clientAccount.publicKey.toBuffer(), executorAccount.publicKey.toBuffer()],
-        program.programId
-      );
-
-      const [executor_bond_vault_account_pda, _executor_bond_vault_account_bump] = await PublicKey.findProgramAddress(
-        [seed, Buffer.from(anchor.utils.bytes.utf8.encode("deposit_bond_executor")), clientAccount.publicKey.toBuffer(), executorAccount.publicKey.toBuffer()],
-        program.programId
-      );
-
-      const [client_bond_vault_account_pda, _client_bond_vault_account_bump] = await PublicKey.findProgramAddress(
-        [seed, Buffer.from(anchor.utils.bytes.utf8.encode("deposit_bond_client")), clientAccount.publicKey.toBuffer(), executorAccount.publicKey.toBuffer()],
-        program.programId
-      );
-
-      var state_account_bump = _state_account_bump
-      var state_account_pda = _state_account_pda
-
-      var vault_authority_pda = _vault_authority_pda;
-      await program.methods.initializeWithBond(
-        seed,
-        new anchor.BN(amount),
-        new anchor.BN(clientBondAmount),
-        new anchor.BN(executorBondAmount),
-        new anchor.BN(serviceFee),
-        new anchor.BN(deadline),
-        holderMode
-      ).accounts({
-          client: clientAccount.publicKey,
-          executor: executorAccount.publicKey,
-          payer: payer.publicKey,
-          serviceFeeAccount: serviceFeeTokenAccount,
-          clientTokenAccount: clientTokenAccount,
-          clientServiceTokenAccount: clientServiceTokenAccount,
-          executorTokenAccount: executorTokenAccount,
-          clientBondAccount: clientBondTokenAccount,
-          executorBondAccount: executorBondTokenAccount,
-          clientBondMint: clientBondMint,
-          executorBondMint: executorBondMint,
-          authority: _vault_authority_pda,
-          mint: mint,
-          depositAccount: vault_account_pda,
-          dealState: state_account_pda,
-          holderDepositAccount: _holder_vault_account_pda,
-          holderMint: holderMint,
-          depositClientBondAccount: client_bond_vault_account_pda,
-          depositExecutorBondAccount: executor_bond_vault_account_pda,
-          systemProgram: anchor.web3.SystemProgram.programId,
-          rent: anchor.web3.SYSVAR_RENT_PUBKEY,
-          tokenProgram: TOKEN_PROGRAM_ID,
-        })
-        .signers([clientAccount, executorAccount, payer])
-        .rpc()
-
+      const dealStatePk = getDealStatePk(dealId, clientAccount, executorAccount, DEAL_CONTRACT_PROGRAM_ID)[0];
+      const dealStateDealTa = getAssociatedTokenAddressSync(mint, dealStatePk, true);
+      const dealStateExecutorBondTa = getAssociatedTokenAddressSync(executorBondMint, dealStatePk, true);
+      const dealStateClientBondTa = getAssociatedTokenAddressSync(clientAccount, dealStatePk, true);
+    
       return {
-        vault_account_pda,
-        state_account_pda,
-        vault_account_bump,
-        state_account_bump,
-        vault_authority_pda,
-        seed,
-        executor_bond_vault_account_pda,
-        client_bond_vault_account_pda
+        dealId,
+        dealMint: mint,
+        dealStateDealTa,
+        dealStatePk,
+        dealStateExecutorBondTa,
+        dealStateClientBondTa,
+        clientBondMint,
+        executorBondMint
       }
     }
 
@@ -720,54 +692,54 @@ describe("🤖 Tests Contractus smart-contract", () => {
         0);
 
       try {
-        mintService = await createMint(
+        serviceFeeMint = await createMint(
           provider.connection,
           payer,
-          mintServiceAuthority.publicKey,
+          serviceFeeMintAuthority.publicKey,
           null,
           0,
-          mintServiceKeypair);
+          serviceFeeMintKeypair);
       } catch {
-        mintService = mintServiceKeypair.publicKey
+        serviceFeeMint = serviceFeeMintKeypair.publicKey
       }
       
 
-      clientTokenAccount = await createAccount(provider.connection, payer, mint, clientAccount.publicKey, null, null, TOKEN_PROGRAM_ID);
-      executorTokenAccount = await createAccount(provider.connection, payer, mint, executorAccount.publicKey, null, null, TOKEN_PROGRAM_ID);
-      checkerTokenAccount = await createAccount(provider.connection, payer, mint, checkerAccount.publicKey, null, null, TOKEN_PROGRAM_ID);
-      serviceFeeTokenAccount = await createAccount(provider.connection, payer, mint, serviceFeeAccount.publicKey, null, null, TOKEN_PROGRAM_ID);
+      clientTa = await createAccount(provider.connection, payer, mint, clientAccount.publicKey, null, null, TOKEN_PROGRAM_ID);
+      executorTa = await createAccount(provider.connection, payer, mint, executorAccount.publicKey, null, null, TOKEN_PROGRAM_ID);
+      checkerTa = await createAccount(provider.connection, payer, mint, checkerAccount.publicKey, null, null, TOKEN_PROGRAM_ID);
+      serviceFeeTa = await createAccount(provider.connection, payer, mint, serviceFeeAccount.publicKey, null, null, TOKEN_PROGRAM_ID);
 
-      bondClientTokenAccount = await createAccount(provider.connection, payer, mintBond, clientAccount.publicKey, null, null, TOKEN_PROGRAM_ID);
-      bondExecutorTokenAccount = await createAccount(provider.connection, payer, mintBond, executorAccount.publicKey, null, null, TOKEN_PROGRAM_ID);
+      bondClientTa = await createAccount(provider.connection, payer, mintBond, clientAccount.publicKey, null, null, TOKEN_PROGRAM_ID);
+      bondExecutorTa = await createAccount(provider.connection, payer, mintBond, executorAccount.publicKey, null, null, TOKEN_PROGRAM_ID);
       
-      clientServiceTokenAccount = await createAccount(provider.connection, payer, mintService, clientAccount.publicKey, null, null, TOKEN_PROGRAM_ID);
-      serviceFeeServiceTokenAccount = await createAccount(provider.connection, payer, mintService, serviceFeeAccount.publicKey, null, null, TOKEN_PROGRAM_ID);
+      clientServiceTa = await createAccount(provider.connection, payer, serviceFeeMint, clientAccount.publicKey, null, null, TOKEN_PROGRAM_ID);
+      serviceFeeServiceTa = await createAccount(provider.connection, payer, serviceFeeMint, serviceFeeAccount.publicKey, null, null, TOKEN_PROGRAM_ID);
 
-      await mintTo(provider.connection, payer, mint, clientTokenAccount, mintAuthority.publicKey, clientTokenBalance, [mintAuthority])
-      await mintTo(provider.connection, payer, mint, executorTokenAccount, mintAuthority.publicKey, otherTokenBalance, [mintAuthority])
-      await mintTo(provider.connection, payer, mint, checkerTokenAccount, mintAuthority.publicKey, otherTokenBalance, [mintAuthority])
-      await mintTo(provider.connection, payer, mint, serviceFeeTokenAccount, mintAuthority.publicKey, serviceFeeTokenBalance, [mintAuthority])
+      await mintTo(provider.connection, payer, mint, clientTa, mintAuthority.publicKey, clientTokenBalance, [mintAuthority])
+      await mintTo(provider.connection, payer, mint, executorTa, mintAuthority.publicKey, otherTokenBalance, [mintAuthority])
+      await mintTo(provider.connection, payer, mint, checkerTa, mintAuthority.publicKey, otherTokenBalance, [mintAuthority])
+      await mintTo(provider.connection, payer, mint, serviceFeeTa, mintAuthority.publicKey, serviceFeeTokenBalance, [mintAuthority])
     })
 
     it("Validate state", async () => {
 
-      const clientTokenAccountInfo = await getAccount(
+      const clientTaInfo = await getAccount(
         provider.connection,
-        clientTokenAccount
+        clientTa
       )
-      const executorTokenAccountInfo = await getAccount(
+      const executorTaInfo = await getAccount(
         provider.connection,
-        executorTokenAccount
+        executorTa
       )
-      const checkerTokenAccountInfo = await getAccount(
+      const checkerTaInfo = await getAccount(
         provider.connection,
-        checkerTokenAccount
+        checkerTa
       )
 
-      assert.ok(clientTokenAccountInfo.mint.toBase58() == mint.toBase58())
-      assert.ok(clientTokenAccountInfo.amount.toString() == clientTokenBalance.toString())
-      assert.ok(executorTokenAccountInfo.amount.toString() == otherTokenBalance.toString())
-      assert.ok(checkerTokenAccountInfo.amount.toString() == otherTokenBalance.toString())
+      assert.ok(clientTaInfo.mint.toBase58() == mint.toBase58())
+      assert.ok(clientTaInfo.amount.toString() == clientTokenBalance.toString())
+      assert.ok(executorTaInfo.amount.toString() == otherTokenBalance.toString())
+      assert.ok(checkerTaInfo.amount.toString() == otherTokenBalance.toString())
     });
     
     it("Create deal with holder mode (no CTUS fund)", async () => {
@@ -781,25 +753,25 @@ describe("🤖 Tests Contractus smart-contract", () => {
           clientAccount,
           executorAccount,
           payer,
-          serviceFeeTokenAccount,
-          clientTokenAccount,
-          clientServiceTokenAccount,
-          executorTokenAccount,
-          bondClientTokenAccount,
+          serviceFeeTa,
+          clientTa,
+          clientServiceTa,
+          executorTa,
+          bondClientTa,
           mintBond,
-          bondExecutorTokenAccount,
+          bondExecutorTa,
           mintBond,
           mint,
-          mintService,
+          serviceFeeMint,
           true,
           new Date().getTime() / 1000)
     
-          const state = await program.account.dealState.fetch(data.state_account_pda)
-          const serviceFeeTokenAccountInfo = await getAccount(
+          const state = await program.account.dealState.fetch(data.dealStatePk)
+          const serviceFeeTaInfo = await getAccount(
             provider.connection,
-            serviceFeeTokenAccount
+            serviceFeeTa
           )
-          assert.ok(serviceFeeTokenAccountInfo.amount.toString() == service_fee.toString())
+          assert.ok(serviceFeeTaInfo.amount.toString() == service_fee.toString())
           assert.ok(state.amount.toNumber().toString() == amount.toString())
           assert.ok(state.clientKey.toBase58() == clientAccount.publicKey.toBase58())
           assert.ok(state.executorKey.toBase58() == executorAccount.publicKey.toBase58())
@@ -810,15 +782,15 @@ describe("🤖 Tests Contractus smart-contract", () => {
 
     it("Create deal with executor bond", async () => {
 
-      await mintTo(provider.connection, payer, mintBond, bondExecutorTokenAccount, bondMintAuthority.publicKey, 100, [bondMintAuthority])
+      await mintTo(provider.connection, payer, mintBond, bondExecutorTa, bondMintAuthority.publicKey, 100, [bondMintAuthority])
     
       let serviceFee = BigInt(100)
       let executorBond = BigInt(56)
-      const serviceFeeTokenAccountInfo = await getAccount(
+      const serviceFeeTaInfo = await getAccount(
         provider.connection,
-        serviceFeeTokenAccount
+        serviceFeeTa
       )
-      var serviceAccountAmount = serviceFeeTokenAccountInfo.amount
+      var serviceAccountAmount = serviceFeeTaInfo.amount
       
       try {
         var data = await createDeal(
@@ -830,30 +802,30 @@ describe("🤖 Tests Contractus smart-contract", () => {
           clientAccount,
           executorAccount,
           payer,
-          serviceFeeTokenAccount,
-          clientTokenAccount,
-          clientServiceTokenAccount,
-          executorTokenAccount,
-          bondClientTokenAccount,
+          serviceFeeTa,
+          clientTa,
+          clientServiceTa,
+          executorTa,
+          bondClientTa,
           mintBond,
-          bondExecutorTokenAccount,
+          bondExecutorTa,
           mintBond,
           mint,
-          mintService,
+          serviceFeeMint,
           false,
           new Date().getTime() / 1000)
     
-          const state = await program.account.dealState.fetch(data.state_account_pda)
-          const serviceFeeTokenAccountInfo = await getAccount(
+          const state = await program.account.dealState.fetch(data.dealStatePk)
+          const serviceFeeTaInfo = await getAccount(
             provider.connection,
-            serviceFeeTokenAccount
+            serviceFeeTa
           )
-          const executorBondTokenAccountInfo = await getAccount(
+          const executorBondTaInfo = await getAccount(
             provider.connection,
-            data.executor_bond_vault_account_pda
+            data.dealStateExecutorBondTa
           )
-          assert.ok(serviceFeeTokenAccountInfo.amount.toString() == (serviceAccountAmount + serviceFee).toString())
-          assert.ok(executorBondTokenAccountInfo.amount.toString() == executorBond.toString())
+          assert.ok(serviceFeeTaInfo.amount.toString() == (serviceAccountAmount + serviceFee).toString())
+          assert.ok(executorBondTaInfo.amount.toString() == executorBond.toString())
           assert.ok(state.amount.toNumber().toString() == amount.toString())
           assert.ok(state.clientKey.toBase58() == clientAccount.publicKey.toBase58())
           assert.ok(state.executorKey.toBase58() == executorAccount.publicKey.toBase58())
@@ -865,7 +837,7 @@ describe("🤖 Tests Contractus smart-contract", () => {
 
     it("Try create deal twice", async () => {
 
-      await mintTo(provider.connection, payer, mintBond, bondExecutorTokenAccount, bondMintAuthority.publicKey, 100, [bondMintAuthority])
+      await mintTo(provider.connection, payer, mintBond, bondExecutorTa, bondMintAuthority.publicKey, 100, [bondMintAuthority])
     
       let serviceFee = BigInt(100)
       let executorBond = BigInt(56)
@@ -880,16 +852,16 @@ describe("🤖 Tests Contractus smart-contract", () => {
           clientAccount,
           executorAccount,
           payer,
-          serviceFeeTokenAccount,
-          clientTokenAccount,
-          clientServiceTokenAccount,
-          executorTokenAccount,
-          bondClientTokenAccount,
+          serviceFeeTa,
+          clientTa,
+          clientServiceTa,
+          executorTa,
+          bondClientTa,
           mintBond,
-          bondExecutorTokenAccount,
+          bondExecutorTa,
           mintBond,
           mint,
-          mintService,
+          serviceFeeMint,
           false,
           new Date().getTime() / 1000)
 
@@ -903,16 +875,16 @@ describe("🤖 Tests Contractus smart-contract", () => {
           clientAccount,
           executorAccount,
           payer,
-          serviceFeeTokenAccount,
-          clientTokenAccount,
-          clientServiceTokenAccount,
-          executorTokenAccount,
-          bondClientTokenAccount,
+          serviceFeeTa,
+          clientTa,
+          clientServiceTa,
+          executorTa,
+          bondClientTa,
           mintBond,
-          bondExecutorTokenAccount,
+          bondExecutorTa,
           mintBond,
           mint,
-          mintService,
+          serviceFeeMint,
           false,
           new Date().getTime() / 1000)
           assert.ok(false)
@@ -922,14 +894,13 @@ describe("🤖 Tests Contractus smart-contract", () => {
     })
 
     it("Create deal with bond and try cancel", async () => {
-      await mintTo(provider.connection, payer, mintBond, bondExecutorTokenAccount, bondMintAuthority.publicKey, 100, [bondMintAuthority])
-    
+      await mintTo(provider.connection, payer, mintBond, bondExecutorTa, bondMintAuthority.publicKey, 100, [bondMintAuthority])
       let serviceFee = BigInt(100)
       let executorBond = BigInt(56)
 
-      var executorTokenAccountInfo = await getAccount(
+      var executorTaInfo = await getAccount(
         provider.connection,
-        executorTokenAccount
+        executorTa
       )
 
       try {
@@ -942,56 +913,34 @@ describe("🤖 Tests Contractus smart-contract", () => {
           clientAccount,
           executorAccount,
           payer,
-          serviceFeeTokenAccount,
-          clientTokenAccount,
-          clientServiceTokenAccount,
-          executorTokenAccount,
-          bondClientTokenAccount,
+          serviceFeeTa,
+          clientTa,
+          clientServiceTa,
+          executorTa,
+          bondClientTa,
           mintBond,
-          bondExecutorTokenAccount,
+          bondExecutorTa,
           mintBond,
           mint,
-          mintService,
+          serviceFeeMint,
           false,
           (new Date().getTime() / 1000) + 1000
         )
-        executorTokenAccountInfo = await getAccount(
+        executorTaInfo = await getAccount(
           provider.connection,
-          executorTokenAccount
+          executorTa
         )
         try {
-          await program.methods
-          .cancel(data.seed)
-          .accounts({
+          (await getCancelIx({
+            dealContractProgram: program,
+            dealId: data.dealId,
+            clientPk: clientAccount.publicKey,
+            dealMint: data.dealMint,
+            executorPk: executorAccount.publicKey,
             initializer: clientAccount.publicKey,
-            depositAccount: data.vault_account_pda,
-            authority: data.vault_authority_pda,
-            clientTokenAccount: clientTokenAccount,
-            dealState: data.state_account_pda,
-            tokenProgram: TOKEN_PROGRAM_ID,
-          })
-          .signers([clientAccount])
-          .rpc()
-        } catch(error) {
-          assert.ok(error.error.errorCode.code == 'NeedCancelWithBond')
-        }
-        try {
-          await program.methods
-          .cancelWithBond(data.seed)
-          .accounts({
-            clientBondAccount: bondClientTokenAccount,
-            executorBondAccount: bondExecutorTokenAccount,
-            depositClientBondAccount: data.client_bond_vault_account_pda,
-            depositExecutorBondAccount: data.executor_bond_vault_account_pda,
-            initializer: clientAccount.publicKey,
-            depositAccount: data.vault_account_pda,
-            authority: data.vault_authority_pda,
-            clientTokenAccount: clientTokenAccount,
-            dealState: data.state_account_pda,
-            tokenProgram: TOKEN_PROGRAM_ID,
-          })
-          .signers([clientAccount])
-          .rpc()
+            clientBondMint: data.clientBondMint,
+            executorBondMint: data.executorBondMint,
+          })).signers([clientAccount]).rpc()
         } catch(error) {
           assert.ok(error.error.errorCode.code == 'DeadlineNotCome')
         }
@@ -1003,26 +952,26 @@ describe("🤖 Tests Contractus smart-contract", () => {
 
     it("Create and finish deal with bond and deadline", async () => {
 
-      await mintTo(provider.connection, payer, mintBond, bondClientTokenAccount, bondMintAuthority.publicKey, 100, [bondMintAuthority])
-      await mintTo(provider.connection, payer, mintBond, bondExecutorTokenAccount, bondMintAuthority.publicKey, 100, [bondMintAuthority])
+      await mintTo(provider.connection, payer, mintBond, bondClientTa, bondMintAuthority.publicKey, 100, [bondMintAuthority])
+      await mintTo(provider.connection, payer, mintBond, bondExecutorTa, bondMintAuthority.publicKey, 100, [bondMintAuthority])
 
-      var bondClientTokenAccountInfo = await getAccount(
+      var bondClientTaInfo = await getAccount(
         provider.connection,
-        bondClientTokenAccount
+        bondClientTa
       )
-      var bondClientTokenAmountBefore = bondClientTokenAccountInfo.amount
+      var bondClientTokenAmountBefore = bondClientTaInfo.amount
 
-      var bondExecutorTokenAccountInfo = await getAccount(
+      var bondExecutorTaInfo = await getAccount(
         provider.connection,
-        bondExecutorTokenAccount
+        bondExecutorTa
       )
-      var bondExecutorTokenAmountBefore = bondExecutorTokenAccountInfo.amount
+      var bondExecutorTokenAmountBefore = bondExecutorTaInfo.amount
 
-      var clientTokenAccountInfo = await getAccount(
+      var clientTaInfo = await getAccount(
         provider.connection,
-        clientTokenAccount
+        clientTa
       )
-      var clientTokenAmountBefore = clientTokenAccountInfo.amount
+      var clientTokenAmountBefore = clientTaInfo.amount
       
       let amount = BigInt(100)
       let serviceFee = BigInt(100)
@@ -1040,91 +989,87 @@ describe("🤖 Tests Contractus smart-contract", () => {
           clientAccount,
           executorAccount,
           payer,
-          serviceFeeTokenAccount,
-          clientTokenAccount,
-          clientServiceTokenAccount,
-          executorTokenAccount,
-          bondClientTokenAccount,
+          serviceFeeTa,
+          clientTa,
+          clientServiceTa,
+          executorTa,
+          bondClientTa,
           mintBond,
-          bondExecutorTokenAccount,
+          bondExecutorTa,
           mintBond,
           mint,
-          mintService,
+          serviceFeeMint,
           false,
           deadline
         )
         
-        bondClientTokenAccountInfo = await getAccount(
+        bondClientTaInfo = await getAccount(
           provider.connection,
-          bondClientTokenAccount
+          bondClientTa
         )
-        var bondClientTokenAmountAfter = bondClientTokenAccountInfo.amount
+        var bondClientTokenAmountAfter = bondClientTaInfo.amount
   
-        bondExecutorTokenAccountInfo = await getAccount(
+        bondExecutorTaInfo = await getAccount(
           provider.connection,
-          bondExecutorTokenAccount
+          bondExecutorTa
         )
-        var bondExecutorTokenAmountAfter = bondExecutorTokenAccountInfo.amount
+        var bondExecutorTokenAmountAfter = bondExecutorTaInfo.amount
         
-       let depositBondExecutorTokenAccountInfo = await getAccount(
+       let depositBondExecutorTaInfo = await getAccount(
           provider.connection,
           data.executor_bond_vault_account_pda
         )
 
-        let depositBondClientTokenAccountInfo = await getAccount(
+        let depositBondClientTaInfo = await getAccount(
           provider.connection,
           data.client_bond_vault_account_pda
         )
 
-        clientTokenAccountInfo = await getAccount(
+        clientTaInfo = await getAccount(
           provider.connection,
-          clientTokenAccount
+          clientTa
         )
-        var clientTokenAmountAfter = clientTokenAccountInfo.amount
+        var clientTokenAmountAfter = clientTaInfo.amount
 
         assert.ok(bondExecutorTokenAmountAfter < bondExecutorTokenAmountBefore)
         assert.ok(clientTokenAmountAfter < clientTokenAmountBefore)
         assert.ok(bondClientTokenAmountAfter < bondClientTokenAmountBefore)
-        assert.ok(depositBondExecutorTokenAccountInfo.amount == executorBond)
-        assert.ok(depositBondClientTokenAccountInfo.amount == clientBond)
+        assert.ok(depositBondExecutorTaInfo.amount == executorBond)
+        assert.ok(depositBondClientTaInfo.amount == clientBond)
 
         let before_deadline = new Date().getTime() / 1000
-        assert.ok(before_deadline > deadline)
+        assert.ok(before_deadline > deadline);
 
-        await program.methods
-          .cancelWithBond(data.seed)
-          .accounts({
-            clientBondAccount: bondClientTokenAccount,
-            executorBondAccount: bondExecutorTokenAccount,
-            depositClientBondAccount: data.client_bond_vault_account_pda,
-            depositExecutorBondAccount: data.executor_bond_vault_account_pda,
-            initializer: clientAccount.publicKey,
-            depositAccount: data.vault_account_pda,
-            authority: data.vault_authority_pda,
-            clientTokenAccount: clientTokenAccount,
-            dealState: data.state_account_pda,
-            tokenProgram: TOKEN_PROGRAM_ID,
-          })
-          .signers([clientAccount])
+        (await getCancelIx({
+          clientPk: clientAccount.publicKey,
+          dealContractProgram: program,
+          dealId: data.dealId,
+          dealMint: data.dealMint,
+          executorPk: executorAccount.publicKey,
+          initializer: executorAccount.publicKey,
+          checkerKey: checkerAccount.publicKey,
+          clientBondMint: mintBond,
+          executorBondMint: mintBond,
+        })).signers([clientAccount])
           .rpc()
 
-          bondClientTokenAccountInfo = await getAccount(
+          bondClientTaInfo = await getAccount(
             provider.connection,
-            bondClientTokenAccount
+            bondClientTa
           )
-          var bondClientTokenAmountAfterCancel = bondClientTokenAccountInfo.amount
+          var bondClientTokenAmountAfterCancel = bondClientTaInfo.amount
     
-          bondExecutorTokenAccountInfo = await getAccount(
+          bondExecutorTaInfo = await getAccount(
             provider.connection,
-            bondExecutorTokenAccount
+            bondExecutorTa
           )
-          var bondExecutorTokenAmountAfterCancel = bondExecutorTokenAccountInfo.amount
+          var bondExecutorTokenAmountAfterCancel = bondExecutorTaInfo.amount
 
-          clientTokenAccountInfo = await getAccount(
+          clientTaInfo = await getAccount(
             provider.connection,
-            clientTokenAccount
+            clientTa
           )
-          var clientTokenAmountAfterCancel = clientTokenAccountInfo.amount
+          var clientTokenAmountAfterCancel = clientTaInfo.amount
 
           assert.ok(bondClientTokenAmountAfterCancel == bondClientTokenAmountBefore)
           assert.ok(bondExecutorTokenAmountAfterCancel == bondExecutorTokenAmountBefore)
