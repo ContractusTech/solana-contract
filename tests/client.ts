@@ -259,8 +259,11 @@ export async function getFinishIx ({
   .accountsStrict({
     checkerDealTa,
     initializer,
+    client: clientPk,
     executor: executorPk,
     checker: checkerKey ? checkerKey : initializer,
+
+    clientHolderTa: getAssociatedTokenAddressSync(HOLDER_MINT, clientPk),
 
     dealMint,
     clientBondMint: clientBond ? clientBond.mint : dealMint,
@@ -278,6 +281,8 @@ export async function getFinishIx ({
   
     dealState,
 
+    holderMint: HOLDER_MINT,
+    serviceFee: SERVICE_FEE_OWNER,
     associatedTokenProgram: ASSOCIATED_PROGRAM_ID,
     tokenProgram: TOKEN_PROGRAM_ID,
     systemProgram: anchor.web3.SystemProgram.programId,

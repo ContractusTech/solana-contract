@@ -43,7 +43,7 @@ impl DealState {
         self.bump[0]
     }
 
-    pub fn seeds<'a: 'b, 'b>(&'a self) -> [&'b [u8]; 5] {
+    pub fn seeds(&self) -> [&[u8]; 5] {
         [
             &self.id[..],
             DEAL_STATE_SEED,

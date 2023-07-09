@@ -2,15 +2,19 @@ use anchor_lang::prelude::*;
 use anchor_spl::{token::{self, CloseAccount, Token, TokenAccount, Transfer, Mint}, token_interface::spl_token_2022::cmp_pubkeys, associated_token::AssociatedToken};
 
 use crate::{constants::*, state::{DealState, Checker, Bond}, 
-    utils::{CheckerFeeTransfered, PaymentTransfered, BondsTransfered, AccountClosed, DeadlineChecked}, errors::{InvalidAccount, ErrorCodes}};
+    utils::{CheckerFeeTransfered, PaymentTransfered, BondsTransfered, AccountClosed, init_ata, check_ta}, errors::InvalidAccount};
 
 #[derive(Accounts)]
 pub struct Finish<'info> {
-    /// CHECK: This is not dangerous because we don't read or write from this account
+    /// CHECK:
     #[account(mut, signer, constraint = 
-        cmp_pubkeys(&initializer.key, executor.key) || cmp_pubkeys(&initializer.key, checker.key)
+        cmp_pubkeys(&initializer.key, checker.key)
+        || cmp_pubkeys(&initializer.key, client.key)
     )]
     pub initializer: AccountInfo<'info>,
+    /// CHECK:
+    #[account(address = deal_state.client_key)]
+    pub client: AccountInfo<'info>,
     /// CHECK:
     #[account(address = deal_state.executor_key)]
     pub executor: AccountInfo<'info>,
@@ -25,31 +29,43 @@ pub struct Finish<'info> {
     /// CHECK: may be uninitialized. check in access_control
     #[account(mut)]
     pub deal_state_holder_ta: AccountInfo<'info>,
-    #[account(mut,
-        constraint = cmp_pubkeys(&executor_deal_ta.owner, &deal_state.executor_key),
-        constraint = cmp_pubkeys(&executor_deal_ta.mint, &deal_state.deal_token_mint)
+    /// CHECK: may be uninitialized. check in access_control
+    #[account(mut)]
+    pub client_holder_ta: AccountInfo<'info>,
+    #[account(init_if_needed, payer = initializer,
+        associated_token::mint = deal_mint,
+        associated_token::authority = executor,
     )]
     pub executor_deal_ta: Box<Account<'info, TokenAccount>>,
     /// CHECK: may be uninitialized. check in access_control
     #[account(mut)]
     pub checker_deal_ta: AccountInfo<'info>,
 
+    /// CHECK: may be uninitialized. check in access_control
     #[account(mut)]
-    pub deal_state_client_bond_ta: Box<Account<'info, TokenAccount>>,
+    pub deal_state_client_bond_ta: AccountInfo<'info>,
+    /// CHECK: may be uninitialized. check in access_control
     #[account(mut)]
-    pub deal_state_executor_bond_ta: Box<Account<'info, TokenAccount>>,
+    pub deal_state_executor_bond_ta: AccountInfo<'info>,
+    /// CHECK: may be uninitialized. check in access_control
     #[account(mut)]
-    pub client_bond_ta: Box<Account<'info, TokenAccount>>,
+    pub client_bond_ta: AccountInfo<'info>,
+    /// CHECK: may be uninitialized. check in access_control
     #[account(mut)]
-    pub executor_bond_ta: Box<Account<'info, TokenAccount>>,
+    pub executor_bond_ta: AccountInfo<'info>,
 
+    #[account(address = deal_state.deal_token_mint)]
     pub deal_mint: Box<Account<'info, Mint>>,
+    #[account(address = HOLDER_MINT)]
+    pub holder_mint: Box<Account<'info, Mint>>,
     pub client_bond_mint: Box<Account<'info, Mint>>,
     pub executor_bond_mint: Box<Account<'info, Mint>>,
 
-    #[account(
-        mut,
-        constraint = cmp_pubkeys(initializer.to_account_info().key, &deal_state.client_key) 
+    /// CHECK: constant address
+    #[account(mut, address = SERVICE_FEE_OWNER)]
+    pub service_fee: AccountInfo<'info>,
+    #[account(mut, constraint = 
+        cmp_pubkeys(initializer.to_account_info().key, &deal_state.client_key) 
             || if let Some(Checker{checker_key, ..}) = deal_state.checker.as_ref() { 
                 cmp_pubkeys(initializer.to_account_info().key, &checker_key)} else { true },
         close = initializer
@@ -69,6 +85,24 @@ impl<'info> Finish<'info> {
             || !cmp_pubkeys(&deal_state_holder_ta.mint, &HOLDER_MINT){
                 return Err(InvalidAccount::DealStateHolderTokenAccount.into())
             }
+
+            match Account::<TokenAccount>::try_from(&ctx.accounts.client_holder_ta) {
+                Ok(client_holder_ta) => {
+                    if !cmp_pubkeys(&client_holder_ta.owner, ctx.accounts.client.to_account_info().key)
+                    || !cmp_pubkeys(&client_holder_ta.mint, &HOLDER_MINT){
+                        return Err(InvalidAccount::DealStateHolderTokenAccount.into())
+                    }
+                },
+                Err(_) => {
+                    init_ata(
+                        &ctx.accounts.initializer, 
+                        &ctx.accounts.holder_mint.to_account_info(), 
+                        &ctx.accounts.client.to_account_info(), 
+                        &ctx.accounts.client_holder_ta.to_account_info(), 
+                        &ctx.accounts.token_program.to_account_info()
+                    )?;
+                }
+            }
         }
 
         if let Some(Checker{checker_key, ..}) = ctx.accounts.deal_state.checker.as_ref() {
@@ -83,65 +117,62 @@ impl<'info> Finish<'info> {
                     };
                 },
                 Err(_) => {
-
-                    solana_program::program::invoke(
-                        &spl_associated_token_account::instruction::create_associated_token_account(
-                        ctx.accounts.initializer.key,
-                        ctx.accounts.checker.key,
-                        ctx.accounts.deal_mint.to_account_info().key,
-                        ctx.accounts.token_program.key,
-                    ),
-                        &[
-                            ctx.accounts.initializer.to_account_info(),
-                            ctx.accounts.checker.to_account_info(),
-                            ctx.accounts.deal_mint.to_account_info(),
-                            ctx.accounts.checker_deal_ta.to_account_info(),
-                            ctx.accounts.token_program.to_account_info(),
-                        ],
+                    init_ata(
+                        &ctx.accounts.initializer, 
+                        &ctx.accounts.deal_mint.to_account_info(), 
+                        &ctx.accounts.checker.to_account_info(), 
+                        &ctx.accounts.checker_deal_ta.to_account_info(), 
+                        &ctx.accounts.token_program.to_account_info()
                     )?;
                 }
             }
         }
 
         if let Some(Bond { mint, .. }) = ctx.accounts.deal_state.client_bond.as_ref() {
-            if !cmp_pubkeys(&ctx.accounts.client_bond_ta.mint, &mint) {
+            if !cmp_pubkeys(&ctx.accounts.client_bond_mint.key(), mint) {
                 return Err(InvalidAccount::ClientBondMint.into())
-            };
-            if !cmp_pubkeys(&ctx.accounts.client_bond_ta.owner, &ctx.accounts.deal_state.client_key) {
-                return Err(InvalidAccount::ClientBondTokenAccount.into())
-            };
-            if !cmp_pubkeys(&ctx.accounts.deal_state_client_bond_ta.mint, &mint) {
-                return Err(InvalidAccount::DealStateClientBondMint.into())
-            };
-            if !cmp_pubkeys(&ctx.accounts.deal_state_client_bond_ta.owner, &ctx.accounts.deal_state.client_key) {
-                return Err(InvalidAccount::DealStateClientBondTokenAccount.into())
-            };
+            }
+            let deal_state_client_bond_ta = Account::<TokenAccount>::try_from(&ctx.accounts.deal_state_client_bond_ta)?;
+            check_ta(&deal_state_client_bond_ta, &ctx.accounts.client_bond_mint.key(), &ctx.accounts.deal_state.key())?;
+            match Account::<TokenAccount>::try_from(&ctx.accounts.client_bond_ta) {
+                Ok(client_bond_ta) => {
+                    check_ta(&client_bond_ta, &ctx.accounts.client_bond_mint.key(), ctx.accounts.client.key)?;
+                },
+                Err(_) => {
+                    init_ata(
+                        &ctx.accounts.initializer, 
+                        &ctx.accounts.client_bond_mint.to_account_info(), 
+                        &ctx.accounts.client,
+                        &ctx.accounts.client_bond_ta, 
+                        &ctx.accounts.token_program.to_account_info() 
+                    )?;
+                }
+            }
         };
 
         if let Some(Bond { mint, .. }) = ctx.accounts.deal_state.executor_bond.as_ref() {
-            if !cmp_pubkeys(&ctx.accounts.executor_bond_ta.mint, &mint) {
+            if !cmp_pubkeys(&ctx.accounts.executor_bond_mint.key(), mint) {
                 return Err(InvalidAccount::ExecutorBondMint.into())
-            };
-            if !cmp_pubkeys(&ctx.accounts.executor_bond_ta.owner, &ctx.accounts.deal_state.executor_key) {
-                return Err(InvalidAccount::ExecutorBondTokenAccount.into())
-            };
-            if !cmp_pubkeys(&ctx.accounts.deal_state_executor_bond_ta.mint, &mint) {
-                return Err(InvalidAccount::DealStateExecutorBondMint.into())
-            };
-            if !cmp_pubkeys(&ctx.accounts.deal_state_executor_bond_ta.owner, &ctx.accounts.deal_state.executor_key) {
-                return Err(InvalidAccount::DealStateExecutorBondTokenAccount.into())
-            };
+            }
+            let deal_state_executor_bond_ta = Account::<TokenAccount>::try_from(&ctx.accounts.deal_state_executor_bond_ta)?;
+            check_ta(&deal_state_executor_bond_ta, &ctx.accounts.executor_bond_mint.key(), &ctx.accounts.deal_state.key())?;
+            match Account::<TokenAccount>::try_from(&ctx.accounts.executor_bond_ta) {
+                Ok(executor_bond_ta) => {
+                    check_ta(&executor_bond_ta, &ctx.accounts.executor_bond_mint.key(), ctx.accounts.executor.key)?;
+                },
+                Err(_) => {
+                    init_ata(
+                        &ctx.accounts.initializer, 
+                        &ctx.accounts.executor_bond_mint.to_account_info(), 
+                        &ctx.accounts.executor,
+                        &ctx.accounts.executor_bond_ta, 
+                        &ctx.accounts.token_program.to_account_info() 
+                    )?;
+                }
+            }
         };
 
         Ok(())
-    }
-
-    fn check_deadline(&self) -> Result<DeadlineChecked> {
-        if self.deal_state.deadline_ts.is_some() && !self.deal_state.deadline_expired() && cmp_pubkeys(&self.initializer.key, &self.checker.key) {
-            return Err(ErrorCodes::DeadlineNotExpired.into())
-        } else {
-            Ok(DeadlineChecked)
-        }
     }
 
     fn transfer_payment(&self) -> Result<PaymentTransfered> {
@@ -192,7 +223,7 @@ impl<'info> Finish<'info> {
         token::close_account(
             CpiContext::new_with_signer(self.token_program.to_account_info(), CloseAccount {
                 account: self.deal_state_deal_ta.to_account_info(),
-                destination: self.initializer.to_account_info(),
+                destination: self.service_fee.clone(),
                 authority: self.deal_state.to_account_info(),
         }, &[&self.deal_state.seeds()[..]]))?;
         Ok(AccountClosed)
@@ -201,7 +232,6 @@ impl<'info> Finish<'info> {
 
 #[allow(dead_code)]
 struct Checklist {
-    deadline_checked: DeadlineChecked,
     checker_fee_transfered: CheckerFeeTransfered,
     payment_transfered: PaymentTransfered,
     bonds_transfered: BondsTransfered,
@@ -211,7 +241,6 @@ struct Checklist {
 
 #[access_control(Finish::check_accounts(&ctx))]
 pub fn handle(ctx: Context<Finish>) -> Result<()> {
-    let deadline_checked = ctx.accounts.check_deadline()?;
     let payment_transfered = ctx.accounts.transfer_payment()?;
     let checker_fee_transfered = ctx.accounts.transfer_checker_fee()?;
     let bonds_transfered = ctx.accounts.transfer_bonds()?;
@@ -219,7 +248,6 @@ pub fn handle(ctx: Context<Finish>) -> Result<()> {
     let deal_state_deal_ta_closed = ctx.accounts.close_deal_state_deal_ta()?;
 
     Checklist {
-        deadline_checked,
         checker_fee_transfered,
         payment_transfered,
         bonds_transfered,
