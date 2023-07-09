@@ -20,6 +20,9 @@ pub struct Finish<'info> {
     pub executor: AccountInfo<'info>,
     /// CHECK: check in access_control
     pub checker: AccountInfo<'info>,
+    /// CHECK:
+    #[account(mut, signer)]
+    pub payer: AccountInfo<'info>,
     
     #[account(mut,
         constraint = cmp_pubkeys(&deal_state.deal_token_mint, &deal_state_deal_ta.mint),
@@ -68,7 +71,7 @@ pub struct Finish<'info> {
         cmp_pubkeys(initializer.to_account_info().key, &deal_state.client_key) 
             || if let Some(Checker{checker_key, ..}) = deal_state.checker.as_ref() { 
                 cmp_pubkeys(initializer.to_account_info().key, &checker_key)} else { true },
-        close = initializer
+        close = service_fee
     )]
     pub deal_state: Box<Account<'info, DealState>>,
     pub associated_token_program: Program<'info, AssociatedToken>,
@@ -95,7 +98,7 @@ impl<'info> Finish<'info> {
                 },
                 Err(_) => {
                     init_ata(
-                        &ctx.accounts.initializer, 
+                        &ctx.accounts.payer, 
                         &ctx.accounts.holder_mint.to_account_info(), 
                         &ctx.accounts.client.to_account_info(), 
                         &ctx.accounts.client_holder_ta.to_account_info(), 
@@ -118,7 +121,7 @@ impl<'info> Finish<'info> {
                 },
                 Err(_) => {
                     init_ata(
-                        &ctx.accounts.initializer, 
+                        &ctx.accounts.payer, 
                         &ctx.accounts.deal_mint.to_account_info(), 
                         &ctx.accounts.checker.to_account_info(), 
                         &ctx.accounts.checker_deal_ta.to_account_info(), 
@@ -140,7 +143,7 @@ impl<'info> Finish<'info> {
                 },
                 Err(_) => {
                     init_ata(
-                        &ctx.accounts.initializer, 
+                        &ctx.accounts.payer, 
                         &ctx.accounts.client_bond_mint.to_account_info(), 
                         &ctx.accounts.client,
                         &ctx.accounts.client_bond_ta, 
@@ -162,7 +165,7 @@ impl<'info> Finish<'info> {
                 },
                 Err(_) => {
                     init_ata(
-                        &ctx.accounts.initializer, 
+                        &ctx.accounts.payer, 
                         &ctx.accounts.executor_bond_mint.to_account_info(), 
                         &ctx.accounts.executor,
                         &ctx.accounts.executor_bond_ta, 
@@ -205,6 +208,7 @@ impl<'info> Finish<'info> {
                     to: self.client_bond_ta.to_account_info(),
                     authority: self.deal_state.to_account_info(),
                 }, &[&self.deal_state.seeds()[..]]), amount)?;
+                self.close_deal_state_ta(self.deal_state_client_bond_ta.clone())?;
             }
         }
         if let Some(Bond{ amount, .. }) = self.deal_state.executor_bond {
@@ -214,16 +218,17 @@ impl<'info> Finish<'info> {
                     to: self.executor_bond_ta.to_account_info(),
                     authority: self.deal_state.to_account_info(),
                 }, &[&self.deal_state.seeds()[..]]), amount)?;
+                self.close_deal_state_ta(self.deal_state_executor_bond_ta.clone())?;
             }
         }
         Ok(BondsTransfered)
     }
 
-    fn close_deal_state_deal_ta(&self) -> Result<AccountClosed> {
+    fn close_deal_state_ta(&self, token_account: AccountInfo<'info>) -> Result<AccountClosed> {
         token::close_account(
             CpiContext::new_with_signer(self.token_program.to_account_info(), CloseAccount {
-                account: self.deal_state_deal_ta.to_account_info(),
-                destination: self.service_fee.clone(),
+                account: token_account,
+                destination: self.service_fee.to_account_info(),
                 authority: self.deal_state.to_account_info(),
         }, &[&self.deal_state.seeds()[..]]))?;
         Ok(AccountClosed)
@@ -245,7 +250,7 @@ pub fn handle(ctx: Context<Finish>) -> Result<()> {
     let checker_fee_transfered = ctx.accounts.transfer_checker_fee()?;
     let bonds_transfered = ctx.accounts.transfer_bonds()?;
 
-    let deal_state_deal_ta_closed = ctx.accounts.close_deal_state_deal_ta()?;
+    let deal_state_deal_ta_closed = ctx.accounts.close_deal_state_ta(ctx.accounts.deal_state_deal_ta.to_account_info())?;
 
     Checklist {
         checker_fee_transfered,

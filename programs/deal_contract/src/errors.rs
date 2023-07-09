@@ -17,6 +17,8 @@ pub enum ErrorCodes {
 
     #[msg("DealStateNotWithChecker")]
     DealStateNotWithChecker,
+    #[msg("DealStateWithChecker")]
+    DealStateWithChecker,
 
     #[msg("NoClientBond")]
     NoClientBond,
@@ -27,10 +29,18 @@ pub enum ErrorCodes {
     InvalidMint,
     #[msg("InvalidOwner")]
     InvalidOwner,
+
+    #[msg("DealWithClientBond")]
+    DealWithClientBond,
+
+    #[msg("DealWithExecutorBond")]
+    DealWithExecutorBond,
 }
 
 #[error_code]
 pub enum InvalidAccount {
+    #[msg("Initializer")]
+    Initializer,
     #[msg("Checker")]
     Checker,
     #[msg("CheckerDealTokenAccount")]

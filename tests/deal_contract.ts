@@ -384,8 +384,9 @@ describe("🤖 Tests Contractus smart-contract", () => {
         dealId,
         executorPk: executorKp.publicKey,
         checkerKey: checkerKp.publicKey,
+        payerPk: payerKp.publicKey,
       })).instruction()
-      await signAndSendIxs(conn, [await instruction], [checkerKp], checkerKp, [await getAddressLookupTable()])
+      await signAndSendIxs(conn, [await instruction], [checkerKp, payerKp], payerKp, [await getAddressLookupTable()])
 
       const dealStateDealTaInfoAfter = await conn.getAccountInfo(dealStateDealTa, "processed" );
       assert.ok(dealStateDealTaInfoAfter == null, `dealStateDealTaInfoAfter hadn't been closed`)
@@ -453,11 +454,12 @@ describe("🤖 Tests Contractus smart-contract", () => {
           dealId,
           executorPk: executorKp.publicKey,
           checkerKey: checkerKp.publicKey,
+        payerPk: payerKp.publicKey
       })).instruction();
-      await signAndSendIxs(conn, [await instruction], [checkerKp], checkerKp, [await getAddressLookupTable()])
+      await signAndSendIxs(conn, [await instruction], [payerKp, checkerKp], checkerKp, [await getAddressLookupTable()])
       
       const clientDealTaInfo = await getAccount(provider.connection, clientDealTa, "processed");
-      assert.ok((Number(clientDealTaInfoBefore.amount) + Number(amount + checkerFee)).toString() == clientDealTaInfo.amount.toString(),
+      assert.ok((Number(clientDealTaInfoBefore.amount) + Number(amount)).toString() == clientDealTaInfo.amount.toString(),
         `invalid clientDealTaInfo.amount. expected ${(Number(clientDealTaInfoBefore.amount) + Number(amount + checkerFee)).toString()} got ${clientDealTaInfo.amount}`)
     });
 
