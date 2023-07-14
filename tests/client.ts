@@ -173,7 +173,7 @@ export async function getInitializeIx ({
 
 
 export async function getCancelIx ({
-  dealContractProgram, initializer, dealId, clientPk, executorPk, dealMint, checkerKey = null, clientBondMint, executorBondMint
+  dealContractProgram, initializer, dealId, clientPk, executorPk, payerPk, dealMint, checkerKey = null, clientBondMint, executorBondMint
 }: {
   dealContractProgram: Program<DealContract>,
 
@@ -181,6 +181,7 @@ export async function getCancelIx ({
   dealId: string | Buffer,
   clientPk: PublicKey,
   executorPk: PublicKey,
+  payerPk: PublicKey,
   dealMint: PublicKey,
 
   checkerKey?: PublicKey,
@@ -200,6 +201,9 @@ export async function getCancelIx ({
   return dealContractProgram.methods.cancel()
   .accountsStrict({
     initializer,
+    client: clientPk,
+    executor: executorPk,
+    payer: payerPk,
     checkerDealTa,
     checker: checkerKey ? checkerKey : initializer,
 
@@ -231,6 +235,7 @@ export async function getFinishIx ({
   executorPk,
   dealMint,
   holderMode,
+  payerPk,
   checkerKey = null,
   clientBond = null,
   executorBond = null,
@@ -241,6 +246,7 @@ export async function getFinishIx ({
   clientPk: PublicKey,
   executorPk: PublicKey,
   dealMint: PublicKey,
+  payerPk: PublicKey,
   holderMode?: boolean,
   checkerKey?: PublicKey,
   clientBond?: IdlTypes<DealContract>["Bond"],
@@ -259,8 +265,12 @@ export async function getFinishIx ({
   .accountsStrict({
     checkerDealTa,
     initializer,
+    client: clientPk,
     executor: executorPk,
     checker: checkerKey ? checkerKey : initializer,
+    payer: payerPk,
+
+    clientHolderTa: getAssociatedTokenAddressSync(HOLDER_MINT, clientPk),
 
     dealMint,
     clientBondMint: clientBond ? clientBond.mint : dealMint,
@@ -278,6 +288,8 @@ export async function getFinishIx ({
   
     dealState,
 
+    holderMint: HOLDER_MINT,
+    serviceFee: SERVICE_FEE_OWNER,
     associatedTokenProgram: ASSOCIATED_PROGRAM_ID,
     tokenProgram: TOKEN_PROGRAM_ID,
     systemProgram: anchor.web3.SystemProgram.programId,
