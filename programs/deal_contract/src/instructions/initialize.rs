@@ -128,7 +128,7 @@ struct Checklist {
 impl<'info> Initialize<'info> {
     fn check_accounts(ctx: &Context<Initialize>, args: &InitializeArgs) -> Result<()> {
         if args.client_bond.is_some() {
-            Account::<TokenAccount>::try_from(&ctx.accounts.client_bond_mint).map_err(|_|InvalidAccount::ClientBondMint)?;
+            Account::<Mint>::try_from(&ctx.accounts.client_bond_mint).map_err(|_|InvalidAccount::ClientBondMint)?;
 
             let client_bond_ta = Account::<TokenAccount>::try_from(&ctx.accounts.client_bond_ta)?;
             check_ta(&client_bond_ta, &ctx.accounts.client_bond_mint.key(), ctx.accounts.client.key)
@@ -152,7 +152,7 @@ impl<'info> Initialize<'info> {
         };
 
         if args.executor_bond.is_some() {
-            Account::<TokenAccount>::try_from(&ctx.accounts.executor_bond_mint).map_err(|_|InvalidAccount::ExecutorBondMint)?;
+            Account::<Mint>::try_from(&ctx.accounts.executor_bond_mint).map_err(|_|InvalidAccount::ExecutorBondMint)?;
 
             let executor_bond_ta = Account::<TokenAccount>::try_from(&ctx.accounts.executor_bond_ta)?;
             check_ta(&executor_bond_ta, &ctx.accounts.executor_bond_mint.key(), ctx.accounts.executor.key)
