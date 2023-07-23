@@ -208,7 +208,6 @@ impl<'info> Finish<'info> {
                     to: self.client_bond_ta.to_account_info(),
                     authority: self.deal_state.to_account_info(),
                 }, &[&self.deal_state.seeds()[..]]), amount)?;
-                self.close_deal_state_ta(self.deal_state_client_bond_ta.clone())?;
             }
         }
         if let Some(Bond{ amount, .. }) = self.deal_state.executor_bond {
@@ -218,9 +217,16 @@ impl<'info> Finish<'info> {
                     to: self.executor_bond_ta.to_account_info(),
                     authority: self.deal_state.to_account_info(),
                 }, &[&self.deal_state.seeds()[..]]), amount)?;
-                self.close_deal_state_ta(self.deal_state_executor_bond_ta.clone())?;
             }
         }
+
+        if self.deal_state.client_bond.is_some() {
+            self.close_deal_state_ta(self.deal_state_client_bond_ta.clone())?;
+        }
+        if self.deal_state.executor_bond.is_some() && !cmp_pubkeys(self.deal_state_client_bond_ta.key, self.deal_state_executor_bond_ta.key) {
+            self.close_deal_state_ta(self.deal_state_executor_bond_ta.clone())?;
+        }
+
         Ok(BondsTransfered)
     }
 
