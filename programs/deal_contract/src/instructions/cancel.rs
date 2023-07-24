@@ -68,6 +68,9 @@ pub struct Cancel<'info> {
     /// CHECK: in transfer_bonds
     pub executor_bond_mint: AccountInfo<'info>,
 
+    /// CHECK: constant address
+    #[account(mut, address = SERVICE_FEE_OWNER)]
+    pub service_fee: AccountInfo<'info>,
     #[account(mut, close = initializer)]
     pub deal_state: Box<Account<'info, DealState>>,
     pub associated_token_program: Program<'info, AssociatedToken>,
@@ -270,8 +273,6 @@ impl<'info> Cancel<'info> {
                     .with_signer(&[&self.deal_state.seeds()[..]]),
                     *amount,
                 )?;
-
-                self.close_deal_state_ta(&self.deal_state_client_bond_ta)?;
             }
         }
         if let Some(Bond { amount, .. }) = self.deal_state.executor_bond.as_ref() {
@@ -291,28 +292,34 @@ impl<'info> Cancel<'info> {
                     .with_signer(&[&self.deal_state.seeds()[..]]),
                     *amount,
                 )?;
-
-                self.close_deal_state_ta(&self.deal_state_executor_bond_ta)?;
             }
         }
+
+        if self.deal_state.client_bond.is_some() {
+            self.close_deal_state_ta(&self.deal_state_client_bond_ta.clone())?;
+        }
+        if self.deal_state.executor_bond.is_some()
+            && !cmp_pubkeys(
+                self.deal_state_client_bond_ta.key,
+                self.deal_state_executor_bond_ta.key,
+            )
+        {
+            self.close_deal_state_ta(&self.deal_state_executor_bond_ta.clone())?;
+        }
+
         Ok(BondsTransfered)
     }
 
-    fn close_deal_state_ta(
-        &self,
-        deal_state_ta: &impl ToAccountInfo<'info>,
-    ) -> Result<AccountClosed> {
-        token::close_account(
-            CpiContext::new(
-                self.token_program.to_account_info(),
-                CloseAccount {
-                    account: deal_state_ta.to_account_info(),
-                    destination: self.initializer.to_account_info(),
-                    authority: self.deal_state.to_account_info().clone(),
-                },
-            )
-            .with_signer(&[&self.deal_state.seeds()[..]]),
-        )?;
+    fn close_deal_state_ta(&self, token_account: &AccountInfo<'info>) -> Result<AccountClosed> {
+        token::close_account(CpiContext::new_with_signer(
+            self.token_program.to_account_info(),
+            CloseAccount {
+                account: token_account.clone(),
+                destination: self.service_fee.to_account_info(),
+                authority: self.deal_state.to_account_info(),
+            },
+            &[&self.deal_state.seeds()[..]],
+        ))?;
         Ok(AccountClosed)
     }
 }
@@ -325,8 +332,14 @@ pub fn handle(ctx: Context<Cancel>) -> Result<()> {
     let deposit_transfered = ctx.accounts.transfer_deposit()?;
     let bonds_transfered = ctx.accounts.transfer_bonds(initializer)?;
 
-    let deal_state_deal_ta_closed =
-        ctx.accounts.close_deal_state_ta(&*ctx.accounts.deal_state_deal_ta)?;
+    let deal_state_deal_ta_closed = if ctx.accounts.deal_state_deal_ta.to_account_info().lamports()
+        == 0
+    {
+        AccountClosed
+    } else {
+        ctx.accounts
+            .close_deal_state_ta(AsRef::<AccountInfo>::as_ref(&*ctx.accounts.deal_state_deal_ta))?
+    };
 
     Checklist {
         deadline_checked,
