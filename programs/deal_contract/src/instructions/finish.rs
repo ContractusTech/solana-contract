@@ -221,19 +221,19 @@ impl<'info> Finish<'info> {
         }
 
         if self.deal_state.client_bond.is_some() {
-            self.close_deal_state_ta(self.deal_state_client_bond_ta.clone())?;
+            self.close_deal_state_ta(&self.deal_state_client_bond_ta.clone())?;
         }
         if self.deal_state.executor_bond.is_some() && !cmp_pubkeys(self.deal_state_client_bond_ta.key, self.deal_state_executor_bond_ta.key) {
-            self.close_deal_state_ta(self.deal_state_executor_bond_ta.clone())?;
+            self.close_deal_state_ta(&self.deal_state_executor_bond_ta.clone())?;
         }
 
         Ok(BondsTransfered)
     }
 
-    fn close_deal_state_ta(&self, token_account: AccountInfo<'info>) -> Result<AccountClosed> {
+    fn close_deal_state_ta(&self, token_account: &AccountInfo<'info>) -> Result<AccountClosed> {
         token::close_account(
             CpiContext::new_with_signer(self.token_program.to_account_info(), CloseAccount {
-                account: token_account,
+                account: token_account.clone(),
                 destination: self.service_fee.to_account_info(),
                 authority: self.deal_state.to_account_info(),
         }, &[&self.deal_state.seeds()[..]]))?;
@@ -256,7 +256,11 @@ pub fn handle(ctx: Context<Finish>) -> Result<()> {
     let checker_fee_transfered = ctx.accounts.transfer_checker_fee()?;
     let bonds_transfered = ctx.accounts.transfer_bonds()?;
 
-    let deal_state_deal_ta_closed = ctx.accounts.close_deal_state_ta(ctx.accounts.deal_state_deal_ta.to_account_info())?;
+    let deal_state_deal_ta_closed = if ctx.accounts.deal_state_deal_ta.to_account_info().lamports() == 0 { 
+        AccountClosed 
+    } else {
+        ctx.accounts.close_deal_state_ta(&ctx.accounts.deal_state_deal_ta.to_account_info())? 
+    };
 
     Checklist {
         checker_fee_transfered,
