@@ -141,7 +141,7 @@ impl<'info> Cancel<'info> {
         }
 
         if let Some(Bond { mint, .. }) = ctx.accounts.deal_state.client_bond.as_ref() {
-            if cmp_pubkeys(&mint, &ctx.accounts.client_bond_mint.key) {
+            if !cmp_pubkeys(&mint, &ctx.accounts.client_bond_mint.key) {
                 return Err(InvalidAccount::ClientBondMint)?;
             }
 
@@ -176,7 +176,7 @@ impl<'info> Cancel<'info> {
         };
 
         if let Some(Bond { mint, .. }) = ctx.accounts.deal_state.executor_bond.as_ref() {
-            if cmp_pubkeys(&mint, &ctx.accounts.executor_bond_mint.key) {
+            if !cmp_pubkeys(&mint, &ctx.accounts.executor_bond_mint.key) {
                 return Err(InvalidAccount::ExecutorBondMint)?;
             }
 
