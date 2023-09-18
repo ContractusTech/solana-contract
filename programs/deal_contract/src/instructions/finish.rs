@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 use anchor_spl::{token::{self, CloseAccount, Token, TokenAccount, Transfer, Mint}, token_interface::spl_token_2022::cmp_pubkeys, associated_token::AssociatedToken};
 
 use crate::{constants::*, state::{DealState, Checker, Bond}, 
-    utils::{CheckerFeeTransfered, PaymentTransfered, BondsTransfered, AccountClosed, init_ata, check_ta}, errors::InvalidAccount};
+    utils::{CheckerFeeTransfered, PaymentTransfered, BondsTransfered, AccountClosed, init_ata, check_ta, HolderModeHandled}, errors::InvalidAccount};
 
 #[derive(Accounts)]
 pub struct Finish<'info> {
@@ -230,6 +230,24 @@ impl<'info> Finish<'info> {
         Ok(BondsTransfered)
     }
 
+    fn handle_holder_mode(&self) -> Result<HolderModeHandled> {
+        if let Some(amount) = self.deal_state.holder_mode {
+            token::transfer(
+                CpiContext::new_with_signer(self.token_program.to_account_info(),
+                    Transfer { 
+                        from: self.deal_state_holder_ta.to_account_info(),
+                        to: self.client_holder_ta.to_account_info(),
+                        authority: self.deal_state.to_account_info() 
+                    }, 
+                    &[&self.deal_state.seeds()[..]]
+                ), 
+                amount
+            )?;
+        }
+
+        Ok(HolderModeHandled)
+    }
+
     fn close_deal_state_ta(&self, token_account: &AccountInfo<'info>) -> Result<AccountClosed> {
         token::close_account(
             CpiContext::new_with_signer(self.token_program.to_account_info(), CloseAccount {
@@ -246,6 +264,7 @@ struct Checklist {
     checker_fee_transfered: CheckerFeeTransfered,
     payment_transfered: PaymentTransfered,
     bonds_transfered: BondsTransfered,
+    holder_mode_handled: HolderModeHandled,
     deal_state_deal_ta_closed: AccountClosed,
 }
 
@@ -255,6 +274,7 @@ pub fn handle(ctx: Context<Finish>) -> Result<()> {
     let payment_transfered = ctx.accounts.transfer_payment()?;
     let checker_fee_transfered = ctx.accounts.transfer_checker_fee()?;
     let bonds_transfered = ctx.accounts.transfer_bonds()?;
+    let holder_mode_handled = ctx.accounts.handle_holder_mode()?;
 
     let deal_state_deal_ta_closed = if ctx.accounts.deal_state_deal_ta.to_account_info().lamports() == 0 { 
         AccountClosed 
@@ -266,6 +286,7 @@ pub fn handle(ctx: Context<Finish>) -> Result<()> {
         checker_fee_transfered,
         payment_transfered,
         bonds_transfered,
+        holder_mode_handled,
         deal_state_deal_ta_closed,
     };
     
