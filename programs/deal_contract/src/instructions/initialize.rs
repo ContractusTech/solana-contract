@@ -264,7 +264,7 @@ impl<'info> Initialize<'info> {
 
         if holder_mode {
             let cpi_accounts = Transfer {
-                from: self.client_deal_ta.to_account_info(),
+                from: self.client_holder_ta.to_account_info(),
                 to: self.deal_state_holder_ta.to_account_info(),
                 authority: self.client.clone(),
             };
