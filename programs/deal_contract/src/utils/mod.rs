@@ -16,6 +16,7 @@ pub(crate) struct BondsTransfered;
 pub(crate) struct HolderModeHandled;
 
 pub(crate) struct PaymentTransfered;
+pub(crate) struct AdvancePaymentTransfered;
 // pub(crate) struct PaymentReturned;
 
 // pub(crate) struct CheckerAccountsChecked;
