@@ -7,6 +7,7 @@ pub(crate) mod checklist;
 
 // pub(crate) struct SignaturesChecked;
 pub(crate) struct DealStateCreated;
+pub(crate) struct DealStateUpdated;
 pub(crate) struct DeadlineChecked;
 pub(crate) struct DealAmountChecked;
 
