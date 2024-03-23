@@ -7,7 +7,7 @@ use anchor_spl::{token::{
 use crate::{constants::*, 
     errors::{ErrorCodes, InvalidAccount}, 
     state::{DealState, Bond, Checker }, 
-    utils::{DeadlineChecked, DealStateCreated, BondsTransfered, HolderModeHandled, DepositTransfered, CheckerFeeTransfered, DealAmountChecked, check_ta, init_ata}};
+    utils::{DeadlineChecked, DealStateCreated, BondsTransfered, HolderModeHandled, DepositTransfered, CheckerFeeTransfered, DealAmountChecked, check_ta, init_ata, AdvancePaymentTransfered}};
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
 pub struct InitializeArgs {
@@ -19,6 +19,7 @@ pub struct InitializeArgs {
     pub client_bond: Option<u64>,
     pub executor_bond: Option<u64>,
     pub checker_fee: Option<u64>,
+    pub advance_payment_amount: u64,
 }
 
 #[derive(Accounts)]
@@ -122,7 +123,9 @@ struct Checklist {
     pub bonds_transfered: BondsTransfered,
     pub holder_mode_handled: HolderModeHandled,
     pub deposit_transfered: DepositTransfered,
-    pub checker_fee_transfered: CheckerFeeTransfered
+    pub checker_fee_transfered: CheckerFeeTransfered,
+
+    pub advance_payment_transfered: AdvancePaymentTransfered,
 }
 
 impl<'info> Initialize<'info> {
@@ -280,6 +283,20 @@ impl<'info> Initialize<'info> {
         
         Ok(HolderModeHandled)
     }
+
+    fn transfer_advance_payment(&self, amount: u64) -> Result<AdvancePaymentTransfered> {
+        let cpi_accounts = Transfer {
+            from: self.deal_state_deal_ta.to_account_info(),
+            to: self.executor_deal_ta.to_account_info(),
+            authority: self.deal_state.to_account_info(),
+        };
+        token::transfer(
+            CpiContext::new(self.token_program.to_account_info(), cpi_accounts)
+                .with_signer(&[&self.deal_state.seeds()]), 
+            amount)?;
+
+        Ok(AdvancePaymentTransfered)
+    }
 }
 
 #[access_control(Initialize::check_accounts(&ctx, &args))]
@@ -298,6 +315,7 @@ pub fn handle(ctx: Context<Initialize>, args: InitializeArgs) -> Result<()> {
             } else { None },
 
             amount: args.deal_amount,
+            paid_amount: args.advance_payment_amount,
 
             deadline_ts: args.deadline_ts,
             deal_token_mint: ctx.accounts.deal_mint.to_account_info().key(),
@@ -319,6 +337,8 @@ pub fn handle(ctx: Context<Initialize>, args: InitializeArgs) -> Result<()> {
 
     let bonds_transfered = ctx.accounts.transfer_bonds(args.client_bond, args.executor_bond)?;
 
+    let advance_payment_transfered = ctx.accounts.transfer_advance_payment(args.advance_payment_amount)?;
+    
     Checklist {
         deadline_checked,
         amount_checked,
@@ -326,7 +346,8 @@ pub fn handle(ctx: Context<Initialize>, args: InitializeArgs) -> Result<()> {
         deposit_transfered,
         deal_state_created,
         bonds_transfered,
-        holder_mode_handled
+        holder_mode_handled,
+        advance_payment_transfered
     };
 
     Ok(())

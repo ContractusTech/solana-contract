@@ -31,4 +31,8 @@ pub mod deal_contract {
     pub fn update_checker(ctx: Context<UpdateChecker>, new_checker_fee: u64) -> Result<()> {
         instructions::update_checker::handle(ctx, new_checker_fee)
     }
+
+    pub fn partially_pay(ctx: Context<PartiallyPay>, args: PartiallyPayArgs) -> Result<()> {
+        instructions::partially_pay::handle(ctx, args)
+    }
 }

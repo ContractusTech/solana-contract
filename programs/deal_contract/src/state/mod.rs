@@ -28,6 +28,7 @@ pub struct DealState {
     pub holder_mode: Option<u64>,
 
     pub amount: u64,
+    pub paid_amount: u64,
 
     pub deadline_ts: Option<i64>,
 

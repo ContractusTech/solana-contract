@@ -239,19 +239,21 @@ impl<'info> Cancel<'info> {
     }
 
     fn transfer_deposit(&self) -> Result<DepositTransfered> {
-        // let checker_fee = if let Some(Checker{checker_fee,..}) = self.deal_state.checker {checker_fee} else {0};
-        token::transfer(
-            CpiContext::new_with_signer(
-                self.token_program.to_account_info(),
-                Transfer {
-                    from: self.deal_state_deal_ta.to_account_info(),
-                    to: self.client_deal_ta.to_account_info(),
-                    authority: self.deal_state.to_account_info(),
-                },
-                &[&self.deal_state.seeds()[..]],
-            ),
-            self.deal_state.amount,
-        )?;
+        let amount_to_transfer = self.deal_state.amount.saturating_sub(self.deal_state.paid_amount);
+        if amount_to_transfer > 0 {
+            token::transfer(
+                CpiContext::new_with_signer(
+                    self.token_program.to_account_info(),
+                    Transfer {
+                        from: self.deal_state_deal_ta.to_account_info(),
+                        to: self.client_deal_ta.to_account_info(),
+                        authority: self.deal_state.to_account_info(),
+                    },
+                    &[&self.deal_state.seeds()],
+                ),
+                amount_to_transfer,
+            )?;
+        }
         Ok(DepositTransfered)
     }
 
