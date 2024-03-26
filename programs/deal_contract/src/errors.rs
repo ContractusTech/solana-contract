@@ -35,6 +35,9 @@ pub enum ErrorCodes {
 
     #[msg("DealWithExecutorBond")]
     DealWithExecutorBond,
+
+    #[msg("AdvancePaymentExceeded")]
+    AdvancePaymentExceeded,
 }
 
 #[error_code]

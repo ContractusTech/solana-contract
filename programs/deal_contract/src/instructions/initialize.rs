@@ -337,6 +337,7 @@ pub fn handle(ctx: Context<Initialize>, args: InitializeArgs) -> Result<()> {
 
     let bonds_transfered = ctx.accounts.transfer_bonds(args.client_bond, args.executor_bond)?;
 
+    require!(args.advance_payment_amount < args.deal_amount - args.checker_fee.unwrap_or(0), ErrorCodes::AdvancePaymentExceeded);
     let advance_payment_transfered = ctx.accounts.transfer_advance_payment(args.advance_payment_amount)?;
     
     Checklist {

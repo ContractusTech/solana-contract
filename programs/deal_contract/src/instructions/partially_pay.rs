@@ -6,7 +6,7 @@ use anchor_spl::{token::{
 
 use crate::{
     state::DealState, 
-    utils::{PaymentTransfered, DealStateUpdated}};
+    utils::{PaymentTransfered, DealStateUpdated}, errors::ErrorCodes};
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
 pub struct PartiallyPayArgs {
@@ -79,6 +79,7 @@ impl<'info> PartiallyPay<'info> {
 
 pub fn handle(ctx: Context<PartiallyPay>, args: PartiallyPayArgs) -> Result<()> {
     let deal_state_updated = ctx.accounts.update_deal_state(args.amount);
+    require!(ctx.accounts.deal_state.paid_amount < ctx.accounts.deal_state.amount - ctx.accounts.deal_state.checker.as_ref().map(|c|c.checker_fee).unwrap_or(0), ErrorCodes::AdvancePaymentExceeded);
     let payment_transfered = ctx.accounts.transfer_payment(args.amount)?;
     
     Checklist {
